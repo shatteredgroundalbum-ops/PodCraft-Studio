@@ -311,7 +311,7 @@ function ProjectCard({
 
 function EpisodesList({ episodes, onCreate, onUpdate, onDelete }: {
   episodes: Episode[];
-  onCreate: (data: Omit<Episode, 'id' | 'projectId'>) => void;
+  onCreate: (data: Omit<Episode, 'id' | 'projectId' | 'userId' | 'createdAt' | 'updatedAt'>) => void;
   onUpdate: (id: string, u: Partial<Episode>) => void;
   onDelete: (id: string) => void;
 }) {

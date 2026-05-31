@@ -10,6 +10,7 @@ import {
 import { BrandPanel } from '../components/BrandPanel';
 import { useAuth } from '../store/AuthStore';
 import { TERMS_OF_SERVICE, PRIVACY_POLICY } from '../data/legalContent';
+import { recordAcceptance } from '../services/legalService';
 
 function LegalModal({
   title,
@@ -143,6 +144,12 @@ export function Signup() {
     setError('');
     setIsLoading(true);
     const result = await signUp(fullName.trim(), email, password, timezone);
+    if (result.ok && result.userId) {
+      await Promise.all([
+        recordAcceptance(result.userId, 'Terms of Service'),
+        recordAcceptance(result.userId, 'Privacy Policy'),
+      ]);
+    }
     setIsLoading(false);
     if (result.ok) {
       navigate('/dashboard');

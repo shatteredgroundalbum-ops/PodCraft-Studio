@@ -75,6 +75,7 @@
     "zod": "catalog:"
   },
   "dependencies": {
+    "dexie": "^4.4.3",
     "react-router-dom": "^7.16.0"
   }
 }

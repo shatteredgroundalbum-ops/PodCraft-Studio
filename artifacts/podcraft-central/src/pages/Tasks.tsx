@@ -224,8 +224,8 @@ function TaskCard({
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${priorityColors[task.priority]}`}>{task.priority}</span>
-          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusColors[task.status]}`}>{task.status}</span>
+          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${priorityColors[task.priority as TaskPriority]}`}>{task.priority}</span>
+          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusColors[task.status as TaskStatus]}`}>{task.status}</span>
           {isExpanded ? <ChevronDownIcon className="w-5 h-5 text-gray-400" /> : <ChevronRightIcon className="w-5 h-5 text-gray-400" />}
         </div>
       </div>
@@ -264,8 +264,8 @@ function TaskCard({
                     <h1 className="text-xl font-bold text-gray-900 mb-1">{task.name}</h1>
                     <p className="text-sm text-gray-500 mb-3">{task.description || 'No description.'}</p>
                     <div className="flex gap-2 mb-4">
-                      <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${statusColors[task.status]}`}>{task.status}</span>
-                      <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${priorityColors[task.priority]}`}>{task.priority}</span>
+                      <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${statusColors[task.status as TaskStatus]}`}>{task.status}</span>
+                      <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${priorityColors[task.priority as TaskPriority]}`}>{task.priority}</span>
                     </div>
                   </>
                 )}

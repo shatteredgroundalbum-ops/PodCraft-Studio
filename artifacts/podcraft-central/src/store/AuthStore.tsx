@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { createUser, validateUser } from './db';
+import { createAccount, signIn as serviceSignIn } from '../services/authService';
 
-interface AuthUser {
+export interface AuthUser {
+  userId: number;
   email: string;
   name: string;
 }
@@ -9,12 +10,12 @@ interface AuthUser {
 interface AuthContextType {
   user: AuthUser | null;
   isLoading: boolean;
-  signUp: (name: string, email: string, password: string, timezone: string) => Promise<{ ok: boolean; error?: string }>;
+  signUp: (name: string, email: string, password: string, timezone: string) => Promise<{ ok: boolean; error?: string; userId?: number }>;
   signIn: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
   signOut: () => void;
 }
 
-const SESSION_KEY = 'podcraft_session';
+const SESSION_KEY = 'podcraft_session_v2';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -26,32 +27,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const stored = sessionStorage.getItem(SESSION_KEY);
       if (stored) {
-        setUser(JSON.parse(stored));
+        const parsed = JSON.parse(stored) as AuthUser;
+        if (parsed.userId && parsed.email && parsed.name) {
+          setUser(parsed);
+        }
       }
     } catch {
-      // ignore
+      // ignore malformed session
     }
     setIsLoading(false);
   }, []);
 
   const signUp = async (name: string, email: string, password: string, timezone: string) => {
-    const result = await createUser(name, email, password, timezone);
-    if (result.ok) {
-      const u = { email, name };
+    const result = await createAccount(name, email, password, timezone);
+    if (result.ok && result.userId) {
+      const u: AuthUser = { userId: result.userId, email: result.email!, name: result.name! };
       setUser(u);
       sessionStorage.setItem(SESSION_KEY, JSON.stringify(u));
     }
-    return result;
+    return { ok: result.ok, error: result.error, userId: result.userId };
   };
 
   const signIn = async (email: string, password: string) => {
-    const result = await validateUser(email, password);
-    if (result.ok && result.name) {
-      const u = { email, name: result.name };
+    const result = await serviceSignIn(email, password);
+    if (result.ok && result.userId) {
+      const u: AuthUser = { userId: result.userId, email: result.email!, name: result.name! };
       setUser(u);
       sessionStorage.setItem(SESSION_KEY, JSON.stringify(u));
     }
-    return result;
+    return { ok: result.ok, error: result.error };
   };
 
   const signOut = () => {

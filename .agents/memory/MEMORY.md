@@ -1,0 +1,1 @@
+- [Dexie backend stack](dexie-backend-stack.md) — 12-table Dexie DB + 14-service layer; component→store→service→db architecture; never call IndexedDB directly from components
