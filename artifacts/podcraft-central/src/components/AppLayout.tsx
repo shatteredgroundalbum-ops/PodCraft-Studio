@@ -6,7 +6,7 @@ import {
   HomeIcon, FolderIcon, CalendarIcon, CheckCircleIcon, LayoutTemplateIcon,
   ImageIcon, BarChartIcon, UsersIcon, SettingsIcon, PlusIcon, HelpCircleIcon,
   BellIcon, ChevronDownIcon, MicIcon, LogOutIcon, UserIcon, ShieldIcon,
-  PaletteIcon, BookOpenIcon, ScaleIcon, LifeBuoyIcon, InfoIcon,
+  PaletteIcon, BookOpenIcon, ScaleIcon, LifeBuoyIcon, InfoIcon, SparklesIcon,
 } from 'lucide-react';
 
 interface AppLayoutProps {
@@ -46,6 +46,7 @@ export function AppLayout({ children, title, breadcrumbs, rightHeader }: AppLayo
     { label: 'Templates', icon: LayoutTemplateIcon, href: '/templates' },
     { label: 'Media Library', icon: ImageIcon, href: '/media-library' },
     { label: 'Studio', icon: MicIcon, href: '/studio' },
+    { label: 'AI Producer', icon: SparklesIcon, href: '/ai-producer' },
     { label: 'Analytics', icon: BarChartIcon, href: '/analytics' },
     { label: 'Team', icon: UsersIcon, href: '/team' },
   ];

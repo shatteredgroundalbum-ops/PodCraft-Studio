@@ -23,6 +23,7 @@ import { Help } from './pages/Help';
 import { About } from './pages/About';
 import { KnowledgeBase } from './pages/KnowledgeBase';
 import { Legal } from './pages/Legal';
+import { AIProducer } from './pages/AIProducer';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
@@ -72,6 +73,7 @@ function AppRoutes() {
       <Route path="/about" element={<ProtectedRoute><About /></ProtectedRoute>} />
       <Route path="/knowledge-base/*" element={<ProtectedRoute><KnowledgeBase /></ProtectedRoute>} />
       <Route path="/legal/*" element={<ProtectedRoute><Legal /></ProtectedRoute>} />
+      <Route path="/ai-producer" element={<ProtectedRoute><AIProducer /></ProtectedRoute>} />
 
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

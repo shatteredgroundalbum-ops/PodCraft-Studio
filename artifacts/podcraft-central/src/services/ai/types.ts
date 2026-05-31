@@ -111,3 +111,237 @@ export interface MasteringRecommendation {
   targetLUFS: number;
   summary: string;
 }
+
+// ─── Production Pipeline Types ──────────────────────────────────────────────
+
+export type ProductionStage =
+  | 'planning'
+  | 'pre-production'
+  | 'production'
+  | 'post-production'
+  | 'mixing'
+  | 'mastering'
+  | 'packaging'
+  | 'distribution';
+
+// Stage 1 — Planning
+export interface EpisodeSegment {
+  name: string;
+  type: 'intro' | 'main' | 'interview' | 'sponsor' | 'outro' | 'transition' | 'qa';
+  durationMinutes: number;
+  description: string;
+  talkingPoints?: string[];
+}
+
+export interface EpisodeConcept {
+  title: string;
+  premise: string;
+  targetAudience: string;
+  format: 'solo' | 'interview' | 'panel' | 'narrative' | 'roundtable';
+  estimatedDuration: string;
+  uniqueAngle: string;
+}
+
+export interface EpisodePlan {
+  concept: EpisodeConcept;
+  segments: EpisodeSegment[];
+  guestSuggestions: string[];
+  contentStrategy: string;
+  publishingNote: string;
+}
+
+export interface ChecklistItem {
+  id: string;
+  stage: ProductionStage;
+  task: string;
+  required: boolean;
+  completed: boolean;
+}
+
+export interface EpisodeBlueprint {
+  plan: EpisodePlan;
+  checklist: ChecklistItem[];
+  estimatedProductionHours: number;
+}
+
+// Stage 2 — Pre-Production
+export interface ResearchSource {
+  title: string;
+  type: 'article' | 'book' | 'study' | 'data' | 'expert' | 'other';
+  notes: string;
+  reliability: 'high' | 'medium' | 'low';
+}
+
+export interface ResearchPackage {
+  topic: string;
+  sources: ResearchSource[];
+  keyFacts: string[];
+  statistics: string[];
+  controversies: string[];
+  expertPerspectives: string[];
+}
+
+export interface OutlineSection {
+  title: string;
+  type: 'intro' | 'main' | 'interview-question' | 'sponsor' | 'transition' | 'outro';
+  estimatedMinutes: number;
+  talkingPoints: string[];
+  notes?: string;
+}
+
+export interface EpisodeOutline {
+  title: string;
+  sections: OutlineSection[];
+  totalEstimatedMinutes: number;
+  interviewQuestions: string[];
+  sponsorPlacements: string[];
+  productionNotes: string;
+}
+
+// Stage 4 — Post-Production
+export interface EditPoint {
+  timestampApprox: string;
+  type: 'silence' | 'filler' | 'noise' | 'mistake' | 'pacing';
+  description: string;
+  recommendation: 'cut' | 'fade' | 'reduce' | 'keep';
+  severity: 'high' | 'medium' | 'low';
+}
+
+export interface EditRecommendation {
+  editPoints: EditPoint[];
+  fillerWordEstimate: number;
+  totalSilenceEstimateSeconds: number;
+  estimatedEditSavingsMinutes: number;
+  cleanupSuggestions: string[];
+  assemblyOrder: string[];
+  trackOrganizationNotes: string;
+}
+
+// Stage 5 — Mixing
+export interface MixRecommendation {
+  loudnessNote: string;
+  targetLUFS: number;
+  measuredLUFS?: number;
+  loudnessPass: boolean;
+  eqSuggestions: string[];
+  compressionSuggestions: string[];
+  balanceNotes: string[];
+  stereoNotes: string;
+  consistencyScore: number;
+  overallReport: string;
+}
+
+// Stage 7 — Packaging
+export interface ChapterMarker {
+  timestampSeconds: number;
+  title: string;
+  description?: string;
+}
+
+export interface EpisodeMetadata {
+  title: string;
+  description: string;
+  episode?: number;
+  season?: number;
+  explicit: boolean;
+  language: string;
+  categories: string[];
+  keywords: string[];
+}
+
+export interface SocialCopySet {
+  twitter: string;
+  linkedin: string;
+  instagram: string;
+  newsletter: string;
+}
+
+export interface EpisodePackage {
+  metadata: EpisodeMetadata;
+  showNotes: string;
+  chapters: ChapterMarker[];
+  socialCopy: SocialCopySet;
+}
+
+// Stage 8 — Distribution
+export type ExportFormat = 'mp3' | 'wav' | 'flac' | 'aac';
+export type DistributionPlatform = 'spotify' | 'apple-podcasts' | 'youtube' | 'rss' | 'google-podcasts';
+
+export interface PlatformRequirement {
+  platform: DistributionPlatform;
+  label: string;
+  formatRecommendation: string;
+  metadataRequired: string[];
+  notes: string;
+  ready: boolean;
+}
+
+export interface DistributionPackage {
+  recommendedFormat: ExportFormat;
+  recommendedBitrate: string;
+  targetLUFS: number;
+  platforms: PlatformRequirement[];
+  exportChecklist: string[];
+  publishingMetadata: EpisodeMetadata;
+  approvalRequired: boolean;
+  distributionNotes: string;
+}
+
+// Quality Scorecard
+export interface QualityCategoryScore {
+  score: number;
+  grade: 'A' | 'B' | 'C' | 'D' | 'F';
+  pass: boolean;
+  feedback: string;
+  improvements: string[];
+}
+
+export interface QualityScorecard {
+  overallScore: number;
+  overallGrade: 'A' | 'B' | 'C' | 'D' | 'F';
+  readyForExport: boolean;
+  categories: {
+    audioQuality: QualityCategoryScore;
+    noiseLevel: QualityCategoryScore;
+    loudnessCompliance: QualityCategoryScore;
+    scriptStructure: QualityCategoryScore;
+    pacing: QualityCategoryScore;
+    introQuality: QualityCategoryScore;
+    outroQuality: QualityCategoryScore;
+    metadataCompleteness: QualityCategoryScore;
+    distributionReadiness: QualityCategoryScore;
+  };
+  blockers: string[];
+  recommendations: string[];
+  generatedAt: string;
+}
+
+// Approval system
+export type ApprovalImpact = 'low' | 'medium' | 'high' | 'destructive';
+
+export interface ApprovalRequest {
+  id: string;
+  action: string;
+  description: string;
+  impact: ApprovalImpact;
+  payload?: unknown;
+}
+
+// Shared context carried between stages
+export interface ProducerEpisodeContext {
+  showName?: string;
+  hostName?: string;
+  topic?: string;
+  targetAudience?: string;
+  format?: EpisodeConcept['format'];
+  durationMinutes?: number;
+  blueprint?: EpisodeBlueprint;
+  research?: ResearchPackage;
+  outline?: EpisodeOutline;
+  script?: ScriptDraft;
+  editRecommendation?: EditRecommendation;
+  mixRecommendation?: MixRecommendation;
+  masteringRecommendation?: MasteringRecommendation;
+  episodePackage?: EpisodePackage;
+  distribution?: DistributionPackage;
+}
