@@ -1,125 +1,169 @@
 import type { MasteringRecommendation, AIMessage } from './types';
-import { PODCAST_STANDARDS } from './types';
+import { PROCESSING_RANGES, QUALITY_OUTCOMES, evaluateRange } from './types';
 import { aiProviderService } from './aiProviderService';
 
-// Nine-step mastering chain (per PodCraft professional standard)
+const R = PROCESSING_RANGES;
+
+// ─── 9-step mastering chain ───────────────────────────────────────────────────
+
 const MASTERING_CHAIN = [
-  '1. Corrective EQ — remove problem frequencies; high-pass rumble below 80–100 Hz',
-  '2. Noise cleanup (if needed) — reduce fan, HVAC, electrical hum without artifacts',
-  '3. Compression — control dynamics, improve consistency; avoid over-compression',
-  '4. De-esser (if needed) — target harsh S/SH/Z/CH only; use sparingly',
-  '5. Level balancing — all speakers at consistent, comfortable listening level',
-  '6. Limiter — ceiling at −1 dBTP; prevent any clipping',
-  `7. Loudness normalization — target ${PODCAST_STANDARDS.stereoTargetLUFS} LUFS (stereo) or ${PODCAST_STANDARDS.monoTargetLUFS} LUFS (mono)`,
-  '8. Final listen-through — verify speech clarity, naturalness, and overall comfort',
+  '1. Corrective EQ — HPF in gold zone (70–90 Hz); fix any resonances; do not colour the voice',
+  '2. Noise cleanup (if needed) — aim for 3–8 dB noise reduction gold zone; stop if artifacts appear',
+  '3. Compression — ratio in gold zone (2.5:1–4:1); adapt to voice character; no squashing',
+  '4. De-esser (if needed) — 2–5 dB gold zone reduction; check for lisping after',
+  '5. Level balancing — all speakers at consistent perceived level',
+  '6. Limiter — ceiling at −1 dBTP (gold zone); never allow true peaks above 0 dBFS',
+  '7. Loudness normalisation — target −16 LUFS stereo / −19 LUFS mono',
+  '8. Final listen-through — verify speech clarity, naturalness, and comfort at normal listening volume',
   '9. Export validation — confirm format, bitrate, sample rate, and metadata',
 ];
 
+const MASTERING_RANGE_PROMPT = `
+MASTERING RANGES — aim for the gold zone; adapt to the specific recording.
+
+LOUDNESS TARGETS
+| Channel | Min      | ← Gold Zone → | Max      |
+|---------|----------|----------------|----------|
+| Stereo  | ${R.loudness.stereoLUFS.min} LUFS | ${R.loudness.stereoLUFS.goldLow} LUFS          | ${R.loudness.stereoLUFS.max} LUFS    |
+| Mono    | ${R.loudness.monoLUFS.min} LUFS | ${R.loudness.monoLUFS.goldLow} LUFS          | ${R.loudness.monoLUFS.max} LUFS    |
+
+LIMITER CEILING
+| Min      | ← Gold Zone → | Max       |
+|----------|----------------|-----------|
+| ${R.limiter.ceilingDBTP.min} dBTP | ${R.limiter.ceilingDBTP.goldLow} dBTP (target)   | ${R.limiter.ceilingDBTP.max} dBTP |
+
+QUALITY OUTCOMES
+| Category    | Fail (under)                        | Gold Zone                    | Overprocessed           |
+|-------------|-------------------------------------|------------------------------|-------------------------|
+| Loudness    | ${QUALITY_OUTCOMES.loudness.fail} | ${QUALITY_OUTCOMES.loudness.gold} | ${QUALITY_OUTCOMES.loudness.over} |
+| Compression | ${QUALITY_OUTCOMES.compression.fail} | ${QUALITY_OUTCOMES.compression.gold} | ${QUALITY_OUTCOMES.compression.over} |
+| EQ          | ${QUALITY_OUTCOMES.eq.fail}          | ${QUALITY_OUTCOMES.eq.gold}          | ${QUALITY_OUTCOMES.eq.over}         |
+
+Key principle: Do NOT chase loudness. A podcast at −16 LUFS that is clear and natural will
+always outperform one at −14 LUFS that sounds squashed or fatiguing.
+`;
+
 class MasteringAssistantService {
-  /** Standard mastering presets — all true peak ceilings at −1 dBTP per spec */
+  /** Starting-point presets — ranges, not fixed values. The AI will adapt. */
   getDefaultRecommendation(style: string, isMono = false): MasteringRecommendation {
-    const stereoLUFS = PODCAST_STANDARDS.stereoTargetLUFS;   // −16
-    const monoLUFS   = PODCAST_STANDARDS.monoTargetLUFS;     // −19
-    const tp         = PODCAST_STANDARDS.truePeakCeiling;    // −1
+    const stereo = R.loudness.stereoLUFS.goldLow;   // −16
+    const mono   = R.loudness.monoLUFS.goldLow;     // −19
+    const tp     = R.limiter.ceilingDBTP.goldLow;   // −1
+
+    const targetLUFS = isMono ? mono : stereo;
 
     const presets: Record<string, MasteringRecommendation> = {
       Broadcast: {
-        eq: 'High-pass at 80 Hz; gentle presence boost at 2–4 kHz for intelligibility',
-        compression: 'Ratio 4:1, attack 10 ms, release 100 ms, threshold −18 dBFS',
-        deEssing: 'Target 5–8 kHz, moderate threshold — use only if sibilance is harsh',
-        limiting: `Ceiling ${tp} dBTP, moderate limiting`,
-        noiseReduction: 'Light noise gate, −40 dB floor',
-        targetLUFS: isMono ? monoLUFS : stereoLUFS,
-        summary: `Broadcast — standard spoken-word podcast delivery. Target ${isMono ? monoLUFS : stereoLUFS} LUFS / ${tp} dBTP.`,
+        eq: `HPF in gold zone (${R.eq.hpfHz.goldLow}–${R.eq.hpfHz.goldHigh} Hz); gentle presence boost (+${R.eq.presenceBoostDB.goldLow}–+${R.eq.presenceBoostDB.goldHigh} dB) if voice lacks clarity`,
+        compression: `Ratio in gold zone (2.5:1–4:1 depending on voice dynamics); gain reduction in gold zone (${R.compression.gainReductionDB.goldLow}–${R.compression.gainReductionDB.goldHigh} dB)`,
+        deEssing: `De-esser if sibilance is harsh; reduction in gold zone (${R.deEsser.reductionDB.goldLow}–${R.deEsser.reductionDB.goldHigh} dB)`,
+        limiting: `Ceiling at ${tp} dBTP (gold zone)`,
+        noiseReduction: `Noise reduction in gold zone (${R.noiseReduction.reductionDB.goldLow}–${R.noiseReduction.reductionDB.goldHigh} dB) only if background noise is present`,
+        targetLUFS,
+        summary: `Broadcast — standard spoken-word delivery. Gold zone: ${targetLUFS} LUFS / ${tp} dBTP. Adapt all settings to the specific voice.`,
       },
       Natural: {
-        eq: 'High-pass at 60 Hz; subtle air shelf at 12 kHz; preserve warmth',
-        compression: 'Ratio 2:1, slow attack 30 ms, release 200 ms, threshold −24 dBFS',
-        deEssing: 'Light de-essing at 6 kHz only if needed',
-        limiting: `Ceiling ${tp} dBTP, transparent limiting`,
-        noiseReduction: 'Very light noise reduction — preserve room character',
-        targetLUFS: isMono ? monoLUFS : stereoLUFS,
-        summary: `Natural — preserves dynamics; comfortable for long-form listening. Target ${isMono ? monoLUFS : stereoLUFS} LUFS / ${tp} dBTP.`,
+        eq: `HPF at low end of gold zone (${R.eq.hpfHz.goldLow} Hz); avoid boosting; preserve natural air`,
+        compression: `Light ratio (${R.compression.ratio.goldLow}:1); slow attack (${R.compression.attackMS.goldHigh} ms) to let transients breathe`,
+        deEssing: `De-esser only if voice has harsh sibilance; minimal reduction (${R.deEsser.reductionDB.goldLow}–${R.deEsser.reductionDB.goldLow + 1} dB)`,
+        limiting: `Ceiling at ${tp} dBTP; transparent limiting`,
+        noiseReduction: `Very light — use only if clearly needed; avoid artifacts`,
+        targetLUFS,
+        summary: `Natural — preserves dynamics and expression. Gold zone target ${targetLUFS} LUFS / ${tp} dBTP.`,
       },
       Warm: {
-        eq: 'High-pass at 80 Hz; low-mid boost at 200 Hz (+2 dB); gentle cut at 4 kHz',
-        compression: 'Ratio 3:1, attack 15 ms, release 150 ms',
-        deEssing: 'Moderate de-essing — check for lisp artifacts after',
-        limiting: `Ceiling ${tp} dBTP`,
-        noiseReduction: 'Standard noise reduction',
-        targetLUFS: isMono ? monoLUFS : stereoLUFS,
-        summary: `Warm — intimate interview feel; enhanced low-end. Target ${isMono ? monoLUFS : stereoLUFS} LUFS / ${tp} dBTP.`,
+        eq: `HPF at gold zone midpoint (~${Math.round((R.eq.hpfHz.goldLow + R.eq.hpfHz.goldHigh) / 2)} Hz); gentle low-mid body if voice is thin`,
+        compression: `Moderate ratio (3:1); medium attack to preserve warmth; release in gold zone`,
+        deEssing: `Moderate de-essing only if needed; check for lisp after`,
+        limiting: `Ceiling at ${tp} dBTP`,
+        noiseReduction: `Standard — gold zone reduction (${R.noiseReduction.reductionDB.goldLow}–${R.noiseReduction.reductionDB.goldHigh} dB)`,
+        targetLUFS,
+        summary: `Warm — intimate, conversational feel. Gold zone target ${targetLUFS} LUFS / ${tp} dBTP.`,
       },
       Clear: {
-        eq: 'High-pass at 100 Hz; presence boost at 3–5 kHz (+2–3 dB) for clarity',
-        compression: 'Ratio 3.5:1, fast attack 5 ms, release 80 ms',
-        deEssing: 'Moderate de-essing at 6–7 kHz — check naturalness afterward',
-        limiting: `Ceiling ${tp} dBTP`,
-        noiseReduction: 'Moderate noise reduction',
-        targetLUFS: isMono ? monoLUFS : stereoLUFS,
-        summary: `Clear — crisp highs for dialogue-heavy shows. Target ${isMono ? monoLUFS : stereoLUFS} LUFS / ${tp} dBTP.`,
+        eq: `HPF at ${R.eq.hpfHz.goldHigh} Hz; presence boost in gold zone (+${R.eq.presenceBoostDB.goldLow}–+${R.eq.presenceBoostDB.goldHigh} dB) for dialogue clarity`,
+        compression: `Ratio up to high end of gold zone (4:1) for consistency; faster attack for busy speech`,
+        deEssing: `Moderate de-essing — clarity preset may boost frequencies where sibilance lives; check carefully`,
+        limiting: `Ceiling at ${tp} dBTP`,
+        noiseReduction: `Moderate noise reduction; stop before metallic artifacts`,
+        targetLUFS,
+        summary: `Clear — optimised for intelligibility. Gold zone target ${targetLUFS} LUFS / ${tp} dBTP.`,
       },
-      // Note: −14 LUFS is only appropriate for music-heavy / streaming-music adjacent content
-      // Standard spoken-word podcasts should use −16 / −19 LUFS for listener comfort
       MusicHeavy: {
-        eq: 'High-pass at 80 Hz; broad presence boost 2–5 kHz (+3 dB)',
-        compression: 'Ratio 4:1, attack 8 ms, release 80 ms',
-        deEssing: 'Strong de-essing — music-heavy mix benefits from controlled sibilance',
-        limiting: `Ceiling ${tp} dBTP, firm limiting`,
-        noiseReduction: 'Standard noise reduction',
-        targetLUFS: PODCAST_STANDARDS.musicPlatformLUFS,
-        summary: `Music-Heavy — ${PODCAST_STANDARDS.musicPlatformLUFS} LUFS / ${tp} dBTP. Use only when music is a primary element, not for pure spoken-word podcasts.`,
+        eq: `Standard HPF; presence boost as needed for voice to cut through music`,
+        compression: `Moderate-to-firm ratio (3.5:1–4:1); consistent output level essential when music is present`,
+        deEssing: `May need firmer de-essing — brightness of music can make sibilance more noticeable`,
+        limiting: `Ceiling at ${tp} dBTP`,
+        noiseReduction: `Standard`,
+        targetLUFS: R.loudness.stereoLUFS.max,  // −14 LUFS — music-heavy only
+        summary: `Music-Heavy — ${R.loudness.stereoLUFS.max} LUFS / ${tp} dBTP. Use only when music is a primary element. Verify voice always remains intelligible.`,
       },
     };
 
     return presets[style] ?? {
-      eq: 'High-pass at 80 Hz; corrective EQ as needed',
-      compression: 'Ratio 2:1–4:1, conservative settings',
-      deEssing: 'Light de-essing only if sibilance is problematic',
-      limiting: `Ceiling ${tp} dBTP`,
-      noiseReduction: 'Standard noise reduction',
-      targetLUFS: isMono ? monoLUFS : stereoLUFS,
-      summary: `${style} mastering preset. Target ${isMono ? monoLUFS : stereoLUFS} LUFS / ${tp} dBTP.`,
+      eq: `HPF in gold zone (${R.eq.hpfHz.goldLow}–${R.eq.hpfHz.goldHigh} Hz); corrective EQ as needed`,
+      compression: `Ratio in gold zone; adapt to voice`,
+      deEssing: `De-esser only if sibilance is harsh`,
+      limiting: `Ceiling at ${tp} dBTP`,
+      noiseReduction: `Gold zone noise reduction (${R.noiseReduction.reductionDB.goldLow}–${R.noiseReduction.reductionDB.goldHigh} dB) if needed`,
+      targetLUFS,
+      summary: `${style} preset. Gold zone target: ${targetLUFS} LUFS / ${tp} dBTP.`,
     };
   }
 
-  getMasteringChain(): string[] {
-    return MASTERING_CHAIN;
-  }
-
-  async getPersonalisedRecommendation(style: string, notes: string, isMono = false, onChunk?: (c: string) => void): Promise<string> {
-    const targetLUFS = isMono ? PODCAST_STANDARDS.monoTargetLUFS : PODCAST_STANDARDS.stereoTargetLUFS;
-    const messages: AIMessage[] = [{
-      role: 'user',
-      content: `Provide specific mastering recommendations for a ${style}-style podcast episode.
-Recording notes: ${notes}
-Target: ${targetLUFS} LUFS integrated loudness, ${PODCAST_STANDARDS.truePeakCeiling} dBTP true peak ceiling
-Channel: ${isMono ? 'Mono' : 'Stereo'}
-
-Cover EQ, compression, de-essing, limiting, and noise reduction. Follow the mastering chain order:
-corrective EQ → noise cleanup → compression → de-esser → level balancing → limiter → loudness normalization.
-Prioritise speech clarity and listener comfort. Do not chase loudness.`,
-    }];
-    return aiProviderService.prompt(messages, { onChunk });
-  }
+  getMasteringChain(): string[] { return MASTERING_CHAIN; }
 
   checkLoudnessCompliance(measuredLUFS: number, isMono = false): {
+    position: string;
     pass: boolean;
     target: number;
-    difference: number;
     verdict: string;
   } {
-    const target = isMono ? PODCAST_STANDARDS.monoTargetLUFS : PODCAST_STANDARDS.stereoTargetLUFS;
+    const range = isMono ? R.loudness.monoLUFS : R.loudness.stereoLUFS;
+    const pos = evaluateRange(measuredLUFS, range);
+    const target = range.goldLow;
     const diff = measuredLUFS - target;
-    const pass = Math.abs(diff) <= 1.5;
-    return {
-      pass,
-      target,
-      difference: diff,
-      verdict: pass
-        ? `Compliant: ${measuredLUFS} LUFS is within range of ${target} LUFS target`
-        : `Non-compliant: ${measuredLUFS} LUFS is ${Math.abs(diff).toFixed(1)} LU ${diff > 0 ? 'above' : 'below'} the ${target} LUFS target`,
+
+    const verdicts: Record<string, string> = {
+      'below-min':  `Too quiet: ${measuredLUFS} LUFS is ${Math.abs(diff).toFixed(1)} LU below the ${range.min} LUFS minimum`,
+      'below-gold': `Below gold zone: ${measuredLUFS} LUFS — target is ${target} LUFS`,
+      'gold':       `Gold zone: ${measuredLUFS} LUFS ≈ ${target} LUFS target ✓`,
+      'above-gold': `Above gold zone: ${measuredLUFS} LUFS — max is ${range.max} LUFS`,
+      'above-max':  `Too loud: ${measuredLUFS} LUFS exceeds ${range.max} LUFS maximum — risk of listener fatigue`,
     };
+
+    return {
+      position: pos,
+      pass: pos === 'gold' || pos === 'below-gold' || pos === 'above-gold',
+      target,
+      verdict: verdicts[pos],
+    };
+  }
+
+  async getPersonalisedRecommendation(
+    style: string,
+    notes: string,
+    isMono = false,
+    voiceCharacter = '',
+    micType = '',
+    onChunk?: (c: string) => void,
+  ): Promise<string> {
+    const targetLUFS = isMono ? R.loudness.monoLUFS.goldLow : R.loudness.stereoLUFS.goldLow;
+    const messages: AIMessage[] = [{
+      role: 'user',
+      content: `Provide personalised mastering recommendations for a ${style}-style ${isMono ? 'mono' : 'stereo'} podcast.
+
+CONTEXT
+Recording notes: ${notes}
+Voice character: ${voiceCharacter || 'not specified'}
+Microphone: ${micType || 'not specified'}
+
+${MASTERING_RANGE_PROMPT}
+
+Adapt all settings to this specific voice and recording. Explain why each setting suits this context.
+Target: ${targetLUFS} LUFS integrated loudness, ${R.limiter.ceilingDBTP.goldLow} dBTP true peak ceiling.`,
+    }];
+    return aiProviderService.prompt(messages, { onChunk });
   }
 }
 

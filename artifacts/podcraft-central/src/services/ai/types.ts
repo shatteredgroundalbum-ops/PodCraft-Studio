@@ -301,6 +301,107 @@ export const PODCAST_STANDARDS = {
   maxClipDB:           0,   // 0 dBFS absolute clipping threshold
 } as const;
 
+// ─── Processing Ranges ────────────────────────────────────────────────────────
+// Each parameter has Min (too little) / Gold Zone / Max (too much / danger).
+// There is no single correct setting — the AI must aim for the gold zone and
+// adapt based on the actual voice, microphone, and room conditions.
+
+export interface ProcessingRange {
+  readonly min: number;
+  readonly goldLow: number;
+  readonly goldHigh: number;
+  readonly max: number;
+  readonly unit: string;
+  readonly description: string;
+}
+
+export type RangePosition =
+  | 'below-min'   // too little — failing
+  | 'below-gold'  // usable but below target
+  | 'gold'        // ideal range
+  | 'above-gold'  // above target but still acceptable
+  | 'above-max';  // too much — danger zone
+
+/** Evaluate where a value falls within a processing range. */
+export function evaluateRange(
+  value: number,
+  range: Pick<ProcessingRange, 'min' | 'goldLow' | 'goldHigh' | 'max'>,
+): RangePosition {
+  if (value < range.min)     return 'below-min';
+  if (value < range.goldLow) return 'below-gold';
+  if (value <= range.goldHigh) return 'gold';
+  if (value <= range.max)    return 'above-gold';
+  return 'above-max';
+}
+
+export const PROCESSING_RANGES = {
+
+  recording: {
+    /** Peak input level — gold zone leaves headroom for loud moments */
+    inputPeakDB:       { min: -30, goldLow: -18, goldHigh: -12, max: -6,   unit: 'dBFS',    description: 'Peak input level during speech' } as ProcessingRange,
+    /** Sample rate — 48 kHz is the broadcast / podcast gold standard */
+    sampleRateHz:      { min: 44100, goldLow: 48000, goldHigh: 48000, max: 96000, unit: 'Hz', description: 'Recording sample rate' } as ProcessingRange,
+    /** Bit depth — 24-bit gives editing headroom without file size bloat */
+    bitDepth:          { min: 16,  goldLow: 24,  goldHigh: 24,  max: 32,   unit: 'bit',     description: 'Recording bit depth' } as ProcessingRange,
+  },
+
+  eq: {
+    /** High-pass filter cutoff — removes rumble without thinning the voice */
+    hpfHz:             { min: 40,  goldLow: 70,  goldHigh: 90,  max: 120,  unit: 'Hz',      description: 'High-pass filter cutoff' } as ProcessingRange,
+    /** Presence / clarity boost — only use if the voice already lacks clarity */
+    presenceBoostDB:   { min: 0,   goldLow: 2,   goldHigh: 4,   max: 8,    unit: 'dB',      description: 'Presence boost at 3–5 kHz region' } as ProcessingRange,
+    /** Mud reduction cut — reduces boxy / hollow character at 200–400 Hz */
+    mudReductionDB:    { min: 0,   goldLow: 2,   goldHigh: 4,   max: 8,    unit: 'dB cut',  description: 'Mid cut at 200–400 Hz to reduce muddiness' } as ProcessingRange,
+  },
+
+  compression: {
+    /** Ratio — higher values squash dynamics more aggressively */
+    ratio:             { min: 1.5, goldLow: 2.5, goldHigh: 4,   max: 8,    unit: ':1',      description: 'Compression ratio' } as ProcessingRange,
+    /** Gain reduction — how hard the compressor is working at threshold */
+    gainReductionDB:   { min: 1,   goldLow: 3,   goldHigh: 6,   max: 10,   unit: 'dB',      description: 'Gain reduction at typical speech level' } as ProcessingRange,
+    /** Attack — faster grabs transients, slower lets them breathe */
+    attackMS:          { min: 1,   goldLow: 10,  goldHigh: 30,  max: 100,  unit: 'ms',      description: 'Compressor attack time' } as ProcessingRange,
+    /** Release — how fast the compressor recovers between words */
+    releaseMS:         { min: 25,  goldLow: 50,  goldHigh: 150, max: 500,  unit: 'ms',      description: 'Compressor release time' } as ProcessingRange,
+  },
+
+  deEsser: {
+    /** Reduction amount — only as much as needed to remove harshness */
+    reductionDB:       { min: 1,   goldLow: 2,   goldHigh: 5,   max: 8,    unit: 'dB',      description: 'De-esser reduction amount at sibilance frequency' } as ProcessingRange,
+  },
+
+  noiseReduction: {
+    /** Reduction amount — balance between clean audio and artifact avoidance */
+    reductionDB:       { min: 0,   goldLow: 3,   goldHigh: 8,   max: 15,   unit: 'dB',      description: 'Noise reduction gain applied to identified noise' } as ProcessingRange,
+  },
+
+  limiter: {
+    /** True peak ceiling — gold is −1 dBTP, any value above 0 dBTP = clipping failure */
+    ceilingDBTP:       { min: -2,  goldLow: -1,  goldHigh: -1,  max: -0.1, unit: 'dBTP',    description: 'True peak limiter ceiling' } as ProcessingRange,
+  },
+
+  loudness: {
+    /** Stereo podcast integrated loudness target */
+    stereoLUFS:        { min: -20, goldLow: -16, goldHigh: -16, max: -14,  unit: 'LUFS',    description: 'Stereo podcast integrated loudness' } as ProcessingRange,
+    /** Mono podcast integrated loudness target */
+    monoLUFS:          { min: -22, goldLow: -19, goldHigh: -19, max: -16,  unit: 'LUFS',    description: 'Mono podcast integrated loudness' } as ProcessingRange,
+    /** Music relative to voice — negative = music is below voice level */
+    musicUnderVoiceDB: { min: -30, goldLow: -24, goldHigh: -18, max: -12,  unit: 'dB',      description: 'Music level relative to voice' } as ProcessingRange,
+  },
+
+} as const;
+
+// Quality outcome labels — what each extreme sounds like to the listener.
+// These map to the Fail / Gold Zone / Overprocessed continuum.
+export const QUALITY_OUTCOMES = {
+  noiseReduction: { fail: 'distracting background noise',         gold: 'clean and transparent',         over: 'metallic, watery, or robotic artifacts' },
+  eq:             { fail: 'muddy, boxy, or harsh',                gold: 'clear and natural',              over: 'thin, harsh, or artificially coloured' },
+  compression:    { fail: 'uneven — some words quiet, some loud', gold: 'consistent, natural expression', over: 'squashed, lifeless, pump-and-breathe' },
+  deEsser:        { fail: 'harsh, painful S/SH/Z/CH sounds',      gold: 'smooth, comfortable sibilance',  over: 'lisping, dull consonants' },
+  loudness:       { fail: 'too quiet — listener reaches for remote', gold: 'comfortable, consistent level', over: 'fatiguing, hot, aggressive' },
+  musicBalance:   { fail: 'music too faint or absent',            gold: 'music supports, never competes', over: 'music drowns out speech' },
+} as const;
+
 // Quality Scorecard — 13 categories per professional standard
 export type QualityStatus = 'pass' | 'needs-review' | 'fail';
 

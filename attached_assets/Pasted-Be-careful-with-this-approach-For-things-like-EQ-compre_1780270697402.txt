@@ -1,0 +1,120 @@
+Be careful with this approach.
+
+For things like EQ, compression, de-essing, noise reduction, and mastering, there is no single golden setting that works for every voice. A deep male voice, a female voice, a USB microphone, an SM7B, a noisy room, and a treated room all need different settings.
+
+What you can do is define:
+
+Minimum (too little)
+
+Target Range (gold zone)
+
+Maximum (too much / danger zone)
+
+
+That is exactly how professional engineers usually think.
+
+Recording Stage
+
+Setting	Minimum	Gold Zone	Maximum
+
+Input Peak Level	-30 dBFS	-18 to -12 dBFS	-6 dBFS
+Noise Floor	-50 dB	Below -60 dB	Below -80 dB
+Clipping Events	0	0	Any clipping is failure
+Sample Rate	44.1 kHz	48 kHz	96 kHz
+Bit Depth	16-bit	24-bit	32-bit Float
+Mic Distance	12 in	4–8 in	1–2 in
+Room Echo	Noticeable	Minimal	None
+
+
+EQ Stage
+
+High Pass Filter
+
+Setting	Minimum	Gold Zone	Maximum
+
+HPF Frequency	40 Hz	70–90 Hz	120 Hz
+
+
+Presence Boost
+
+Setting	Minimum	Gold Zone	Maximum
+
+Presence EQ	0 dB	+2 to +4 dB	+8 dB
+
+
+Mud Reduction
+
+Setting	Minimum	Gold Zone	Maximum
+
+Cut at 200–400 Hz	0 dB	-2 to -4 dB	-8 dB
+
+
+Compression
+
+Setting	Minimum	Gold Zone	Maximum
+
+Ratio	1.5:1	2.5:1 to 4:1	8:1
+Gain Reduction	1 dB	3–6 dB	10+ dB
+Attack	1 ms	10–30 ms	100 ms
+Release	25 ms	50–150 ms	500 ms
+
+
+De-Esser
+
+Setting	Minimum	Gold Zone	Maximum
+
+Reduction	1 dB	2–5 dB	8 dB
+Sibilance Control	Barely noticeable	Controlled	Lisping
+
+
+Noise Reduction
+
+Setting	Minimum	Gold Zone	Maximum
+
+Reduction	0 dB	3–8 dB	15+ dB
+Artifact Level	None	None	Metallic artifacts
+
+
+Limiter
+
+Setting	Minimum	Gold Zone	Maximum
+
+Ceiling	-2 dBTP	-1 dBTP	-0.1 dBTP
+
+
+Loudness Mastering
+
+Stereo Podcast
+
+Setting	Minimum	Gold Zone	Maximum
+
+LUFS	-20	-16 LUFS	-14 LUFS
+
+
+Mono Podcast
+
+Setting	Minimum	Gold Zone	Maximum
+
+LUFS	-22	-19 LUFS	-16 LUFS
+
+
+Music Under Voice
+
+Setting	Minimum	Gold Zone	Maximum
+
+Music Below Voice	-30 dB	-24 to -18 dB	-12 dB
+
+
+Podcast Quality Score
+
+Category	Fail	Gold Zone	Overprocessed
+
+Noise Reduction	Noisy	Clean	Metallic
+EQ	Muddy	Clear	Harsh
+Compression	Uneven	Consistent	Squashed
+De-Esser	Harsh S sounds	Smooth	Lisping
+Loudness	Too quiet	Target LUFS	Fatiguing
+Music Balance	Distracting	Supportive	Overpowering
+
+
+These are the kinds of ranges I'd have the AI Producer use. Instead of hard-coding exact values, the AI should aim for the gold zone and adjust based on the actual voice, microphone, room, and recording conditions. That will produce far more professional results than forcing the same settings on every recording.
