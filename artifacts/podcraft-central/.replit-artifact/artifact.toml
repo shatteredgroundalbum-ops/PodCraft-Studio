@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "PodCraft Central"
+version = "1.0.0"
+id = "artifacts/podcraft-central"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 21786
+
+[services.development]
+run = "pnpm --filter @workspace/podcraft-central run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/podcraft-central", "run", "build" ]
+publicDir = "artifacts/podcraft-central/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "21786"
+BASE_PATH = "/"

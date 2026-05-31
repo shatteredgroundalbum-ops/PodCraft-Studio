@@ -1,6 +1,6 @@
-# [Project name]
+# PodCraft Central
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+A fully-featured podcast production workspace app — plan, record, edit, mix, master, and publish podcasts, all in the browser.
 
 ## Run & Operate
 
@@ -19,18 +19,38 @@ _Replace the heading above with the project's name, and this line with one sente
 - Validation: Zod (`zod/v4`), `drizzle-zod`
 - API codegen: Orval (from OpenAPI spec)
 - Build: esbuild (CJS bundle)
+- **Frontend**: React + Vite, react-router-dom, Tailwind CSS v4, framer-motion, lucide-react
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/podcraft-central/` — React + Vite SPA, preview path `/`
+- `artifacts/podcraft-central/src/store/db.ts` — IndexedDB CRUD + auth helpers
+- `artifacts/podcraft-central/src/store/AuthStore.tsx` — Auth context (IndexedDB-backed, sessionStorage session)
+- `artifacts/podcraft-central/src/store/MediaStore.tsx` — All entity CRUD with IndexedDB persistence
+- `artifacts/podcraft-central/src/components/` — AppLayout, PodCraftLogo, BrandPanel
+- `artifacts/podcraft-central/src/pages/` — All pages (Splash, Login, Signup, Dashboard, Projects, Studio, Tasks, Analytics, Templates, MediaLibrary, Calendar, Team, Settings, Help, About, KnowledgeBase, Legal)
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- **All data stored locally** in IndexedDB — no backend required for the frontend app
+- **Auth** via IndexedDB user records with a simple hash + sessionStorage session (no JWT, no server)
+- **Studio recording** uses native browser `MediaRecorder` API + Web Audio API for metering
+- **Routing**: react-router-dom v7 with `BrowserRouter` (NOT wouter); nested `<Routes>` for Settings, KnowledgeBase, Legal sub-paths
+- **Providers**: `AuthProvider` > `MediaStoreProvider` wrapping all routes
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+PodCraft Central is a complete podcast production workflow:
+- **Dashboard** — overview, pipeline stats, recent activity
+- **Projects** — expandable project cards with episode management
+- **Studio** — real MediaRecorder recording + Web Audio metering + mastering presets
+- **Tasks** — full task CRUD with checklist, comments, attachments, activity log
+- **Analytics** — platform analytics overview (placeholder for future integration)
+- **Templates** — create/edit/delete production templates
+- **Media Library** — categorized file browser with upload + download
+- **Calendar** — visual month calendar showing task due dates + episode publish dates
+- **Team** — invite/manage team members with roles
+- **Settings** — profile, account, notifications, appearance, audio, privacy, billing, integrations
 
 ## User preferences
 
@@ -38,7 +58,10 @@ _Populate as you build — explicit user instructions worth remembering across s
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- Do NOT use wouter — all pages use react-router-dom
+- Settings, KnowledgeBase, and Legal use nested `<Routes>` (match with `/*` on parent routes)
+- IndexedDB opens once and is cached; `dbInstance` is a module-level singleton
+- Studio uses `MediaRecorder` — browser must allow microphone access; test with real HTTPS or localhost
 
 ## Pointers
 
