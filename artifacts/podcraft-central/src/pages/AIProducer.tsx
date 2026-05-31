@@ -18,11 +18,12 @@ import { distributionService } from '../services/ai/stages/distributionService';
 import { masteringAssistantService } from '../services/ai/masteringAssistantService';
 import { recordingCoachService } from '../services/ai/recordingCoachService';
 import { qualityScorecardService } from '../services/ai/qualityScorecardService';
+import { scriptAssistantService } from '../services/ai/scriptAssistantService';
 import type {
   ProductionStage, EpisodeConcept, EpisodeBlueprint, ResearchPackage,
   EpisodeOutline, EditRecommendation, MixRecommendation, MasteringRecommendation,
   EpisodePackage, DistributionPackage, QualityScorecard, QualityCategoryScore,
-  ApprovalRequest, DistributionPlatform,
+  QualityStatus, ApprovalRequest, DistributionPlatform, ScriptDraft,
 } from '../services/ai/types';
 
 // ─── Stage config ────────────────────────────────────────────────────────────
@@ -84,6 +85,16 @@ function GradeChip({ grade }: { grade: 'A' | 'B' | 'C' | 'D' | 'F' }) {
   return <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${colors[grade]}`}>{grade}</span>;
 }
 
+function StatusChip({ status }: { status: QualityStatus }) {
+  const cfg: Record<QualityStatus, { label: string; cls: string }> = {
+    'pass':         { label: 'Pass',         cls: 'bg-green-100 text-green-700' },
+    'needs-review': { label: 'Needs Review', cls: 'bg-amber-100 text-amber-700' },
+    'fail':         { label: 'Fail',         cls: 'bg-red-100 text-red-600' },
+  };
+  const { label, cls } = cfg[status];
+  return <span className={`text-xs font-semibold px-2 py-0.5 rounded-full whitespace-nowrap ${cls}`}>{label}</span>;
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export function AIProducer() {
@@ -118,6 +129,7 @@ export function AIProducer() {
   const [masteringRec,   setMasteringRec]   = useState<MasteringRecommendation | null>(null);
   const [episodePkg,     setEpisodePkg]     = useState<EpisodePackage | null>(null);
   const [distribution,   setDistribution]   = useState<DistributionPackage | null>(null);
+  const [script,         setScript]         = useState<ScriptDraft | null>(null);
   const [platforms,      setPlatforms]      = useState<DistributionPlatform[]>(['spotify', 'apple-podcasts', 'rss']);
   const [scorecard,      setScorecard]      = useState<QualityScorecard | null>(null);
   const [showScorecard,  setShowScorecard]  = useState(false);
@@ -254,6 +266,47 @@ export function AIProducer() {
             <ol className="space-y-2 list-decimal list-inside">
               {interviewQs.map((q, i) => <li key={i} className="text-sm">{q}</li>)}
             </ol>
+          </Section>
+        )}
+
+        {/* Script Writing */}
+        <div className="border-t border-gray-200 pt-4">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Script Writing</p>
+          <RunBtn label="Generate Script Draft" loading={!!loading.script} disabled={!topic}
+            onClick={() => run('script', async () => setScript(await scriptAssistantService.generateScript(
+              topic,
+              outline?.sections.map(s => s.title) ?? blueprint?.plan.segments.map(s => s.name) ?? [],
+              format,
+              hostName,
+              duration,
+            )))} />
+          <p className="text-xs text-gray-400 mt-1.5">Script will be written for natural spoken delivery — short sentences, conversational tone.</p>
+          {errors.script && <p className="text-red-600 text-xs mt-1">{errors.script}</p>}
+        </div>
+
+        {script && (
+          <Section title={`📄 Script Draft — ${script.title}`}>
+            <p className="text-xs text-gray-500 mb-3">~{script.totalEstimatedMinutes} min total · {script.sections.length} sections</p>
+            <div className="space-y-3">
+              {script.sections.map((s, i) => {
+                const typeColors: Record<string, string> = {
+                  intro: 'bg-violet-100 text-violet-700', segment: 'bg-blue-100 text-blue-700',
+                  transition: 'bg-gray-100 text-gray-600', 'ad-break': 'bg-orange-100 text-orange-700',
+                  outro: 'bg-green-100 text-green-700',
+                };
+                return (
+                  <div key={i} className="border border-gray-200 rounded-lg overflow-hidden">
+                    <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 border-b border-gray-200">
+                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${typeColors[s.type] ?? 'bg-gray-100 text-gray-600'}`}>{s.type}</span>
+                      <span className="font-medium text-sm flex-1">{s.title}</span>
+                      <span className="text-xs text-gray-400">{Math.round((s.estimatedSeconds ?? 0) / 60)}m</span>
+                      <CopyBtn text={s.content} />
+                    </div>
+                    <pre className="p-3 text-xs text-gray-700 whitespace-pre-wrap font-sans leading-relaxed max-h-48 overflow-y-auto">{s.content}</pre>
+                  </div>
+                );
+              })}
+            </div>
           </Section>
         )}
       </div>
@@ -588,9 +641,12 @@ export function AIProducer() {
       const sc = await qualityScorecardService.generateScorecard({
         topic,
         durationMinutes: duration,
-        hasScript: Boolean(outline),
+        hasScript: Boolean(script),
         hasOutline: Boolean(outline),
         hasResearch: Boolean(research),
+        hasSources: Boolean(research?.sources.length),
+        speakerCount: format === 'solo' ? 1 : format === 'panel' || format === 'roundtable' ? 3 : 2,
+        isStereo: true,
         editRec: editRec ?? undefined,
         mixRec: mixRec ?? undefined,
         masteringRec: masteringRec ?? undefined,
@@ -602,17 +658,21 @@ export function AIProducer() {
     } finally {
       setLoad(l => ({ ...l, scorecard: false }));
     }
-  }, [topic, duration, outline, research, editRec, mixRec, masteringRec, episodePkg, measuredLUFS, recordingNotes]);
+  }, [topic, duration, script, outline, research, format, editRec, mixRec, masteringRec, episodePkg, measuredLUFS, recordingNotes]);
 
   const CATEGORY_LABELS: Record<keyof QualityScorecard['categories'], string> = {
-    audioQuality: 'Audio Quality',
-    noiseLevel: 'Noise Level',
-    loudnessCompliance: 'Loudness Compliance',
-    scriptStructure: 'Script Structure',
-    pacing: 'Pacing',
-    introQuality: 'Intro Quality',
-    outroQuality: 'Outro Quality',
-    metadataCompleteness: 'Metadata Completeness',
+    scriptQuality:         'Script Quality',
+    sourceCompleteness:    'Source Completeness',
+    recordingQuality:      'Recording Quality',
+    noiseLevel:            'Noise Level',
+    speechClarity:         'Speech Clarity',
+    speakerBalance:        'Speaker Balance',
+    musicBalance:          'Music Balance',
+    effectsBalance:        'Effects Balance',
+    loudnessCompliance:    'Loudness Compliance',
+    truePeakCompliance:    'True Peak Compliance',
+    metadataCompleteness:  'Metadata Completeness',
+    exportReadiness:       'Export Readiness',
     distributionReadiness: 'Distribution Readiness',
   };
 
@@ -763,33 +823,35 @@ export function AIProducer() {
                       <div className="text-xs text-gray-500">{scorecard.overallScore}/100</div>
                     </div>
                     <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
+                      <div className="flex items-center gap-2 mb-2">
+                        <StatusChip status={scorecard.overallStatus} />
                         <div className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold ${scorecard.readyForExport ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
                           {scorecard.readyForExport ? <CheckCircle2Icon className="w-3.5 h-3.5" /> : <AlertCircleIcon className="w-3.5 h-3.5" />}
                           {scorecard.readyForExport ? 'Ready for Export' : 'Not Yet Ready'}
                         </div>
                       </div>
                       {scorecard.blockers.length > 0 && (
-                        <p className="text-xs text-red-600">{scorecard.blockers.join(' · ')}</p>
+                        <ul className="space-y-0.5">
+                          {scorecard.blockers.map((b, i) => <li key={i} className="text-xs text-red-600 flex items-start gap-1"><span className="mt-0.5 flex-shrink-0">▲</span>{b}</li>)}
+                        </ul>
                       )}
                     </div>
                   </div>
                   <div className="grid grid-cols-1 gap-2 mb-4">
                     {(Object.entries(scorecard.categories) as [keyof QualityScorecard['categories'], QualityCategoryScore][]).map(([key, cat]) => (
                       <div key={key} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
-                        <div className="w-24 flex-shrink-0">
+                        <div className="w-32 flex-shrink-0">
                           <p className="text-xs font-medium text-gray-700">{CATEGORY_LABELS[key]}</p>
                         </div>
                         <div className="flex-1">
                           <div className="w-full bg-gray-200 rounded-full h-1.5">
-                            <div className={`h-1.5 rounded-full ${cat.score >= 80 ? 'bg-green-500' : cat.score >= 70 ? 'bg-blue-500' : cat.score >= 60 ? 'bg-yellow-500' : 'bg-red-500'}`}
+                            <div className={`h-1.5 rounded-full transition-all ${cat.score >= 75 ? 'bg-green-500' : cat.score >= 50 ? 'bg-amber-400' : 'bg-red-500'}`}
                               style={{ width: `${cat.score}%` }} />
                           </div>
                           <p className="text-xs text-gray-500 mt-0.5">{cat.feedback}</p>
                         </div>
-                        <div className="flex items-center gap-2 flex-shrink-0">
-                          <span className="text-xs text-gray-600">{cat.score}</span>
-                          <GradeChip grade={cat.grade} />
+                        <div className="flex-shrink-0">
+                          <StatusChip status={cat.status} />
                         </div>
                       </div>
                     ))}

@@ -148,6 +148,10 @@ export interface EpisodePlan {
   guestSuggestions: string[];
   contentStrategy: string;
   publishingNote: string;
+  purpose?: string;
+  tone?: string;
+  requiredMusicOrSFX?: string[];
+  deliveryGoal?: string;
 }
 
 export interface ChecklistItem {
@@ -287,8 +291,21 @@ export interface DistributionPackage {
   distributionNotes: string;
 }
 
-// Quality Scorecard
+// Professional podcast delivery standards
+// Sources: Apple Podcasts, Spotify, Google/WBUR, Adobe
+export const PODCAST_STANDARDS = {
+  stereoTargetLUFS:  -16,   // Google/WBUR stereo spoken-word reference
+  monoTargetLUFS:    -19,   // Google/WBUR mono spoken-word reference
+  truePeakCeiling:    -1,   // -1 dBTP — Apple/Spotify/universal
+  musicPlatformLUFS: -14,   // Spotify streaming master (music-heavy only)
+  maxClipDB:           0,   // 0 dBFS absolute clipping threshold
+} as const;
+
+// Quality Scorecard — 13 categories per professional standard
+export type QualityStatus = 'pass' | 'needs-review' | 'fail';
+
 export interface QualityCategoryScore {
+  status: QualityStatus;
   score: number;
   grade: 'A' | 'B' | 'C' | 'D' | 'F';
   pass: boolean;
@@ -299,16 +316,21 @@ export interface QualityCategoryScore {
 export interface QualityScorecard {
   overallScore: number;
   overallGrade: 'A' | 'B' | 'C' | 'D' | 'F';
+  overallStatus: QualityStatus;
   readyForExport: boolean;
   categories: {
-    audioQuality: QualityCategoryScore;
-    noiseLevel: QualityCategoryScore;
-    loudnessCompliance: QualityCategoryScore;
-    scriptStructure: QualityCategoryScore;
-    pacing: QualityCategoryScore;
-    introQuality: QualityCategoryScore;
-    outroQuality: QualityCategoryScore;
-    metadataCompleteness: QualityCategoryScore;
+    scriptQuality:         QualityCategoryScore;
+    sourceCompleteness:    QualityCategoryScore;
+    recordingQuality:      QualityCategoryScore;
+    noiseLevel:            QualityCategoryScore;
+    speechClarity:         QualityCategoryScore;
+    speakerBalance:        QualityCategoryScore;
+    musicBalance:          QualityCategoryScore;
+    effectsBalance:        QualityCategoryScore;
+    loudnessCompliance:    QualityCategoryScore;
+    truePeakCompliance:    QualityCategoryScore;
+    metadataCompleteness:  QualityCategoryScore;
+    exportReadiness:       QualityCategoryScore;
     distributionReadiness: QualityCategoryScore;
   };
   blockers: string[];
