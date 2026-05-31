@@ -4,10 +4,103 @@ import { motion } from 'framer-motion';
 import {
   ArrowLeftIcon, UserIcon, MailIcon, LockIcon, EyeIcon, EyeOffIcon,
   GlobeIcon, UserPlusIcon, CalendarIcon, MicIcon, AudioLinesIcon,
-  SlidersHorizontalIcon, UploadIcon, ShieldIcon, XIcon,
+  SlidersHorizontalIcon, UploadIcon, ShieldIcon, XIcon, CheckCircle2Icon,
+  ScrollTextIcon, FileTextIcon,
 } from 'lucide-react';
 import { BrandPanel } from '../components/BrandPanel';
 import { useAuth } from '../store/AuthStore';
+import { TERMS_OF_SERVICE, PRIVACY_POLICY } from '../data/legalContent';
+
+function LegalModal({
+  title,
+  content,
+  onClose,
+  onAgree,
+  alreadyAccepted,
+}: {
+  title: string;
+  content: string;
+  onClose: () => void;
+  onAgree: () => void;
+  alreadyAccepted: boolean;
+}) {
+  const [scrolledToBottom, setScrolledToBottom] = useState(false);
+
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    if (atBottom) setScrolledToBottom(true);
+  };
+
+  const lines = content.trim().split('\n');
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95, y: 10 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ duration: 0.2 }}
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col"
+        style={{ maxHeight: '85vh' }}>
+
+        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 bg-violet-50 rounded-lg flex items-center justify-center">
+              <ScrollTextIcon className="w-4 h-4 text-violet-600" />
+            </div>
+            <h3 className="text-lg font-bold text-gray-900">{title}</h3>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors">
+            <XIcon className="w-5 h-5" />
+          </button>
+        </div>
+
+        {!scrolledToBottom && !alreadyAccepted && (
+          <div className="px-6 py-2 bg-amber-50 border-b border-amber-100 flex-shrink-0">
+            <p className="text-xs text-amber-700">Scroll to the bottom to enable the Agree button.</p>
+          </div>
+        )}
+
+        <div className="flex-1 overflow-y-auto px-6 py-5 text-sm text-gray-700 space-y-2" onScroll={handleScroll}>
+          {lines.map((line, i) => {
+            const trimmed = line.trim();
+            if (trimmed.startsWith('**') && trimmed.endsWith('**') && !trimmed.slice(2, -2).includes('**')) {
+              return <p key={i} className="font-bold text-gray-900 mt-4 first:mt-0">{trimmed.slice(2, -2)}</p>;
+            }
+            if (trimmed.startsWith('*') && trimmed.endsWith('*') && trimmed.length > 2) {
+              return <p key={i} className="text-gray-500 italic text-xs">{trimmed.slice(1, -1)}</p>;
+            }
+            if (trimmed.startsWith('- ')) {
+              return <li key={i} className="ml-5 list-disc leading-relaxed">{trimmed.slice(2)}</li>;
+            }
+            if (trimmed === '') return <div key={i} className="h-1" />;
+            return <p key={i} className="leading-relaxed">{line}</p>;
+          })}
+        </div>
+
+        <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-between flex-shrink-0 bg-gray-50 rounded-b-2xl">
+          <button onClick={onClose} className="px-4 py-2 border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-white transition-colors">
+            Cancel
+          </button>
+          {alreadyAccepted ? (
+            <div className="flex items-center gap-2 text-green-600 text-sm font-medium">
+              <CheckCircle2Icon className="w-5 h-5" />
+              Already agreed
+            </div>
+          ) : (
+            <button
+              onClick={() => { onAgree(); onClose(); }}
+              disabled={!scrolledToBottom}
+              className="px-6 py-2 bg-violet-600 text-white rounded-lg text-sm font-semibold hover:bg-violet-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2">
+              <CheckCircle2Icon className="w-4 h-4" />
+              I Agree
+            </button>
+          )}
+        </div>
+      </motion.div>
+    </div>
+  );
+}
 
 export function Signup() {
   const navigate = useNavigate();
@@ -19,19 +112,34 @@ export function Signup() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [timezone, setTimezone] = useState('(GMT-05:00) Eastern Time (US & Canada)');
-  const [agreeToTerms, setAgreeToTerms] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [privacyAccepted, setPrivacyAccepted] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [modalOpen, setModalOpen] = useState<'terms' | 'privacy' | null>(null);
+
+  const bothAccepted = termsAccepted && privacyAccepted;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!fullName.trim()) { setError('Please enter your full name.'); return; }
     if (!email) { setError('Please enter your email address.'); return; }
     if (password.length < 8) { setError('Password must be at least 8 characters.'); return; }
-    if (!/[0-9]/.test(password) || !/[a-zA-Z]/.test(password)) { setError('Password must contain a number and a letter.'); return; }
+    if (!/[0-9]/.test(password) || !/[a-zA-Z]/.test(password)) {
+      setError('Password must contain at least one letter and one number.');
+      return;
+    }
     if (password !== confirmPassword) { setError('Passwords do not match.'); return; }
-    if (!agreeToTerms) { setError('You must agree to the Terms of Service and Privacy Policy.'); return; }
+    if (!termsAccepted) {
+      setError('You must read and agree to the Terms of Service before creating an account.');
+      setModalOpen('terms');
+      return;
+    }
+    if (!privacyAccepted) {
+      setError('You must read and agree to the Privacy Policy before creating an account.');
+      setModalOpen('privacy');
+      return;
+    }
     setError('');
     setIsLoading(true);
     const result = await signUp(fullName.trim(), email, password, timezone);
@@ -39,7 +147,7 @@ export function Signup() {
     if (result.ok) {
       navigate('/dashboard');
     } else {
-      setError(result.error || 'Sign up failed.');
+      setError(result.error || 'Sign up failed. Please try again.');
     }
   };
 
@@ -59,7 +167,12 @@ export function Signup() {
 
   return (
     <div className="min-h-screen w-full bg-gray-100 flex items-center justify-center p-4">
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} className="w-full max-w-6xl">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+        className="w-full max-w-6xl">
+
         <div className="bg-white rounded-2xl shadow-xl overflow-hidden flex">
           <BrandPanel
             tagline={<>Create.<br />Produce.<br /><span className="text-violet-500">Publish.</span></>}
@@ -82,7 +195,10 @@ export function Signup() {
               </div>
 
               {error && (
-                <div className="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700">{error}</div>
+                <div className="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700 flex items-start gap-2">
+                  <XIcon className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                  {error}
+                </div>
               )}
 
               <form onSubmit={handleSubmit} className="space-y-5">
@@ -151,21 +267,66 @@ export function Signup() {
                   </div>
                 </div>
 
-                <label className="flex items-start gap-2 cursor-pointer">
-                  <input type="checkbox" checked={agreeToTerms} onChange={(e) => setAgreeToTerms(e.target.checked)}
-                    className="mt-0.5 w-4 h-4 rounded border-gray-300 text-violet-600 focus:ring-violet-500" />
-                  <span className="text-sm text-gray-700">
-                    I agree to the{' '}
-                    <button type="button" onClick={() => setModalOpen('terms')} className="text-violet-600 hover:text-violet-700 font-medium">Terms of Service</button>
-                    {' '}and{' '}
-                    <button type="button" onClick={() => setModalOpen('privacy')} className="text-violet-600 hover:text-violet-700 font-medium">Privacy Policy</button>
-                  </span>
-                </label>
+                {/* Legal Agreements */}
+                <div className="space-y-3 py-2">
+                  <p className="text-sm font-medium text-gray-900">Legal agreements <span className="text-red-500">*</span></p>
+                  <p className="text-xs text-gray-500">You must read and agree to both documents before creating your account.</p>
 
-                <button type="submit" disabled={isLoading}
+                  <div
+                    onClick={() => setModalOpen('terms')}
+                    className={`flex items-center justify-between p-4 rounded-xl border-2 cursor-pointer transition-all ${termsAccepted ? 'border-green-300 bg-green-50' : 'border-gray-200 hover:border-violet-300 hover:bg-violet-50/30'}`}>
+                    <div className="flex items-center gap-3">
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${termsAccepted ? 'bg-green-100' : 'bg-violet-50'}`}>
+                        <ScrollTextIcon className={`w-4 h-4 ${termsAccepted ? 'text-green-600' : 'text-violet-600'}`} />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">Terms of Service</p>
+                        <p className="text-xs text-gray-500">Read before agreeing</p>
+                      </div>
+                    </div>
+                    {termsAccepted ? (
+                      <CheckCircle2Icon className="w-5 h-5 text-green-600 flex-shrink-0" />
+                    ) : (
+                      <span className="text-xs font-medium text-violet-600 bg-violet-50 px-2 py-1 rounded-md">Read &amp; Agree →</span>
+                    )}
+                  </div>
+
+                  <div
+                    onClick={() => setModalOpen('privacy')}
+                    className={`flex items-center justify-between p-4 rounded-xl border-2 cursor-pointer transition-all ${privacyAccepted ? 'border-green-300 bg-green-50' : 'border-gray-200 hover:border-violet-300 hover:bg-violet-50/30'}`}>
+                    <div className="flex items-center gap-3">
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${privacyAccepted ? 'bg-green-100' : 'bg-violet-50'}`}>
+                        <FileTextIcon className={`w-4 h-4 ${privacyAccepted ? 'text-green-600' : 'text-violet-600'}`} />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">Privacy Policy</p>
+                        <p className="text-xs text-gray-500">Read before agreeing</p>
+                      </div>
+                    </div>
+                    {privacyAccepted ? (
+                      <CheckCircle2Icon className="w-5 h-5 text-green-600 flex-shrink-0" />
+                    ) : (
+                      <span className="text-xs font-medium text-violet-600 bg-violet-50 px-2 py-1 rounded-md">Read &amp; Agree →</span>
+                    )}
+                  </div>
+
+                  {bothAccepted && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="flex items-center gap-2 text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2 text-sm">
+                      <CheckCircle2Icon className="w-4 h-4 flex-shrink-0" />
+                      Both documents accepted — you're ready to create your account.
+                    </motion.div>
+                  )}
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isLoading}
                   className="w-full bg-violet-600 hover:bg-violet-700 text-white font-semibold py-3 rounded-lg flex items-center justify-center gap-2 transition-colors disabled:opacity-50">
                   <UserPlusIcon className="w-5 h-5" />
-                  {isLoading ? 'Creating account...' : 'Create account'}
+                  {isLoading ? 'Creating account…' : 'Create account'}
                 </button>
 
                 <p className="text-center text-sm text-gray-600">
@@ -189,42 +350,23 @@ export function Signup() {
         </div>
       </motion.div>
 
-      {/* Terms / Privacy Modal */}
-      {modalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col">
-            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-              <h3 className="text-lg font-bold text-gray-900">{modalOpen === 'terms' ? 'Terms of Service' : 'Privacy Policy'}</h3>
-              <button onClick={() => setModalOpen(null)} className="text-gray-400 hover:text-gray-600"><XIcon className="w-5 h-5" /></button>
-            </div>
-            <div className="p-6 overflow-y-auto text-sm text-gray-600 space-y-4">
-              {modalOpen === 'terms' ? (
-                <>
-                  <p><strong>Terms of Service — PodCraft Central</strong></p>
-                  <p>By using PodCraft Central, you agree to these terms. PodCraft Central is a podcast production workspace that stores all data locally in your browser using IndexedDB. No data is transmitted to external servers.</p>
-                  <p><strong>1. Acceptable Use.</strong> You agree to use PodCraft Central only for lawful podcast production purposes.</p>
-                  <p><strong>2. Data.</strong> All your projects, tasks, recordings, and media are stored locally in your browser. Clearing browser data will permanently delete your workspace.</p>
-                  <p><strong>3. No Warranty.</strong> PodCraft Central is provided "as is" without warranty of any kind.</p>
-                  <p><strong>4. Limitation of Liability.</strong> We are not liable for any loss of data or damages arising from use of this application.</p>
-                  <p>Last updated: May 2026</p>
-                </>
-              ) : (
-                <>
-                  <p><strong>Privacy Policy — PodCraft Central</strong></p>
-                  <p>PodCraft Central takes your privacy seriously. This policy explains how your information is handled.</p>
-                  <p><strong>1. Data Storage.</strong> All data — including your account information, projects, tasks, recordings, and media — is stored exclusively in your browser's IndexedDB storage. Nothing is sent to any external server.</p>
-                  <p><strong>2. No Tracking.</strong> PodCraft Central does not use analytics, tracking pixels, or third-party cookies.</p>
-                  <p><strong>3. Microphone Access.</strong> When you use the Studio, we request microphone access solely for recording. Audio data stays on your device.</p>
-                  <p><strong>4. Your Control.</strong> You can delete all data at any time by clearing your browser's site data for this application.</p>
-                  <p>Last updated: May 2026</p>
-                </>
-              )}
-            </div>
-            <div className="px-6 py-4 border-t border-gray-100 flex justify-end">
-              <button onClick={() => setModalOpen(null)} className="px-4 py-2 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-700">Close</button>
-            </div>
-          </div>
-        </div>
+      {modalOpen === 'terms' && (
+        <LegalModal
+          title="Terms of Service"
+          content={TERMS_OF_SERVICE}
+          alreadyAccepted={termsAccepted}
+          onClose={() => setModalOpen(null)}
+          onAgree={() => { setTermsAccepted(true); setError(''); }}
+        />
+      )}
+      {modalOpen === 'privacy' && (
+        <LegalModal
+          title="Privacy Policy"
+          content={PRIVACY_POLICY}
+          alreadyAccepted={privacyAccepted}
+          onClose={() => setModalOpen(null)}
+          onAgree={() => { setPrivacyAccepted(true); setError(''); }}
+        />
       )}
     </div>
   );

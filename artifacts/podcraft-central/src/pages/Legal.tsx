@@ -1,117 +1,36 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { AppLayout } from '../components/AppLayout';
 import { Routes, Route, Link, Navigate, useParams } from 'react-router-dom';
 import { ScaleIcon, ShieldIcon, FileTextIcon, ArrowLeftIcon, ChevronRightIcon } from 'lucide-react';
+import { TERMS_OF_SERVICE, PRIVACY_POLICY, COOKIE_POLICY } from '../data/legalContent';
 
 const DOCUMENTS = [
-  {
-    id: 'terms',
-    title: 'Terms of Service',
-    icon: FileTextIcon,
-    updated: 'May 1, 2026',
-    content: `
-**Terms of Service — PodCraft Central**
-
-*Effective date: May 1, 2026*
-
-By using PodCraft Central ("the App"), you agree to the following terms and conditions.
-
-**1. Description of Service**
-PodCraft Central is a podcast production workspace application. The App operates entirely within your web browser, storing all data locally using IndexedDB. No user data is transmitted to external servers.
-
-**2. Acceptable Use**
-You agree to use PodCraft Central only for lawful purposes related to podcast production and related creative activities. You may not use the App to create, store, or distribute content that:
-- Violates applicable laws or regulations
-- Infringes on intellectual property rights of others
-- Contains malicious code or viruses
-
-**3. Data and Privacy**
-All data you create in PodCraft Central — including account information, projects, tasks, recordings, and media — is stored exclusively in your browser's local storage. The App does not collect, transmit, or store your data on any external server.
-
-**4. No Warranty**
-PodCraft Central is provided "as is" without warranty of any kind, express or implied. We do not warrant that the App will be error-free or uninterrupted.
-
-**5. Limitation of Liability**
-To the fullest extent permitted by law, we shall not be liable for any indirect, incidental, special, consequential, or punitive damages arising from your use of the App.
-
-**6. Changes**
-We reserve the right to modify these terms at any time. Continued use of the App constitutes acceptance of updated terms.
-
-**7. Contact**
-For questions about these terms, please contact us through the Help & Support page.
-    `,
-  },
-  {
-    id: 'privacy',
-    title: 'Privacy Policy',
-    icon: ShieldIcon,
-    updated: 'May 1, 2026',
-    content: `
-**Privacy Policy — PodCraft Central**
-
-*Effective date: May 1, 2026*
-
-PodCraft Central is designed with privacy as a core principle. This policy explains how your information is handled.
-
-**1. Information We Collect**
-PodCraft Central does not collect any personal information. All data you enter — including your account details, projects, recordings, and tasks — is stored locally in your browser's IndexedDB storage on your device.
-
-**2. How Data Is Stored**
-All data is stored in your browser's IndexedDB storage. This data:
-- Never leaves your device unless you explicitly export it
-- Is not accessible to us or any third party
-- Can be deleted by clearing your browser's site data
-
-**3. Microphone Access**
-When you use the Studio, we request access to your microphone. This access is used solely for recording audio within the App. Audio data is stored locally and not transmitted anywhere.
-
-**4. Cookies and Tracking**
-PodCraft Central does not use cookies, tracking pixels, analytics services, or any form of user tracking.
-
-**5. Third-Party Services**
-PodCraft Central does not integrate with third-party data collection services. Any external links (e.g., to documentation) are provided for convenience and are governed by their own privacy policies.
-
-**6. Data Deletion**
-You can delete all your data at any time by clearing your browser's site data for this application. This action is irreversible.
-
-**7. Children's Privacy**
-PodCraft Central is not directed at children under 13. We do not knowingly collect information from children.
-
-**8. Contact**
-For privacy-related questions, contact us through the Help & Support page.
-    `,
-  },
-  {
-    id: 'cookies',
-    title: 'Cookie Policy',
-    icon: FileTextIcon,
-    updated: 'May 1, 2026',
-    content: `
-**Cookie Policy — PodCraft Central**
-
-*Effective date: May 1, 2026*
-
-**Overview**
-PodCraft Central does not use cookies. Session information is stored in browser sessionStorage, which is automatically cleared when you close your browser tab.
-
-**What We Use Instead**
-- **sessionStorage**: Stores your login session temporarily
-- **IndexedDB**: Stores your workspace data persistently
-
-Neither of these are cookies in the traditional sense, and neither involves tracking or sharing data with third parties.
-
-**Third-Party Cookies**
-Any third-party resources (such as images from Unsplash) may set their own cookies. We have no control over these.
-    `,
-  },
+  { id: 'terms', title: 'Terms of Service', icon: FileTextIcon, updated: 'May 1, 2026', content: TERMS_OF_SERVICE },
+  { id: 'privacy', title: 'Privacy Policy', icon: ShieldIcon, updated: 'May 1, 2026', content: PRIVACY_POLICY },
+  { id: 'cookies', title: 'Cookie Policy', icon: FileTextIcon, updated: 'May 1, 2026', content: COOKIE_POLICY },
 ];
+
+function renderContent(content: string) {
+  return content.trim().split('\n').map((line, i) => {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('**') && trimmed.endsWith('**') && !trimmed.slice(2, -2).includes('**')) {
+      return <p key={i} className="font-bold text-gray-900 mt-4 first:mt-0">{trimmed.slice(2, -2)}</p>;
+    }
+    if (trimmed.startsWith('*') && trimmed.endsWith('*') && trimmed.length > 2) {
+      return <p key={i} className="text-gray-500 italic text-sm">{trimmed.slice(1, -1)}</p>;
+    }
+    if (trimmed.startsWith('- ')) return <li key={i} className="ml-4 list-disc leading-relaxed">{trimmed.slice(2)}</li>;
+    if (trimmed === '') return <br key={i} />;
+    return <p key={i} className="leading-relaxed">{line}</p>;
+  });
+}
 
 function DocumentList() {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3 mb-2">
         <ScaleIcon className="w-6 h-6 text-violet-600" />
-        <h1 className="text-2xl font-bold text-gray-900">Legal & Policies</h1>
+        <h1 className="text-2xl font-bold text-gray-900">Legal &amp; Policies</h1>
       </div>
       <p className="text-gray-500">Review our terms, policies, and legal documents.</p>
 
@@ -154,14 +73,8 @@ function DocumentView() {
             <p className="text-xs text-gray-400">Last updated: {doc.updated}</p>
           </div>
         </div>
-        <div className="text-sm text-gray-700 leading-relaxed space-y-3">
-          {doc.content.trim().split('\n').map((line, i) => {
-            if (line.startsWith('**') && line.endsWith('**')) return <p key={i} className="font-bold text-gray-900">{line.slice(2, -2)}</p>;
-            if (line.startsWith('*') && line.endsWith('*')) return <p key={i} className="text-gray-500 italic">{line.slice(1, -1)}</p>;
-            if (line.startsWith('- ')) return <li key={i} className="ml-4 list-disc">{line.slice(2)}</li>;
-            if (line.trim() === '') return <br key={i} />;
-            return <p key={i}>{line}</p>;
-          })}
+        <div className="text-sm text-gray-700 space-y-2">
+          {renderContent(doc.content)}
         </div>
       </div>
     </div>
