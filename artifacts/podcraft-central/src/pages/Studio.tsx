@@ -3,11 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import { AppLayout } from '../components/AppLayout';
 import { useMediaStore } from '../store/MediaStore';
 import { useAuth } from '../store/AuthStore';
+import { useOpenDAW } from '../hooks/useOpenDAW';
 import {
   MicIcon, SquareIcon, SaveIcon, DownloadIcon, SlidersHorizontalIcon,
   ActivityIcon, PencilIcon, UploadIcon, Wand2Icon, SparklesIcon,
   RewindIcon, FastForwardIcon, FileTextIcon, MusicIcon, Music2Icon,
-  AudioWaveformIcon, XIcon, CheckCircle2Icon, AlertCircleIcon,
+  AudioWaveformIcon, XIcon, CheckCircle2Icon, AlertCircleIcon, ZapIcon,
 } from 'lucide-react';
 
 type StudioMode = 'recording' | 'mastering';
@@ -17,6 +18,7 @@ export function Studio() {
   const navigate = useNavigate();
   const { episodes, addAsset } = useMediaStore();
   const { user } = useAuth();
+  const daw = useOpenDAW();
 
   const [mode, setMode] = useState<StudioMode>('recording');
   const [activeSection, setActiveSection] = useState<NavSection>('Record');
@@ -44,23 +46,40 @@ export function Studio() {
   const animFrameRef = useRef<number>(0);
   const timerRef = useRef<number>(0);
 
+  const engineReady = daw.status === 'ready';
+
+  const displayDevices = engineReady && daw.devices.length > 0
+    ? daw.devices.map(d => ({ deviceId: d.deviceId, label: d.label, kind: 'audioinput' as MediaDeviceKind, groupId: '', toJSON: () => ({}) } as MediaDeviceInfo))
+    : devices;
+
+  const displayMeterBars = engineReady ? daw.meterBars : inputLevel;
+
   useEffect(() => {
-    navigator.mediaDevices?.enumerateDevices().then((devs) => {
-      const mics = devs.filter((d) => d.kind === 'audioinput');
-      setDevices(mics);
-    }).catch(() => {});
+    if (!engineReady) {
+      navigator.mediaDevices?.enumerateDevices().then((devs) => {
+        const mics = devs.filter((d) => d.kind === 'audioinput');
+        setDevices(mics);
+      }).catch(() => {});
+    }
     return () => {
       stopStream();
       cancelAnimationFrame(animFrameRef.current);
       clearInterval(timerRef.current);
+      if (engineReady) {
+        daw.stopMeterMonitoring();
+        daw.stopEngineRecording();
+      }
     };
-  }, []);
+  }, [engineReady]);
 
   const stopStream = () => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     cancelAnimationFrame(animFrameRef.current);
     setInputLevel(Array(20).fill(0));
+    if (engineReady) {
+      daw.stopMeterMonitoring();
+    }
   };
 
   const animateMeter = (analyser: AnalyserNode) => {
@@ -96,17 +115,23 @@ export function Studio() {
   };
 
   const handleOpenSetup = async () => {
-    const stream = await requestMic();
-    if (!stream) { setIsSetupOpen(true); return; }
-    stream.getTracks().forEach((t) => t.stop());
-    const devs = await navigator.mediaDevices.enumerateDevices();
-    setDevices(devs.filter((d) => d.kind === 'audioinput'));
-    setIsSetupOpen(true);
+    if (engineReady) {
+      await daw.requestMicPermission().catch(() => {});
+      setIsSetupOpen(true);
+    } else {
+      const stream = await requestMic();
+      if (!stream) { setIsSetupOpen(true); return; }
+      stream.getTracks().forEach((t) => t.stop());
+      const devs = await navigator.mediaDevices.enumerateDevices();
+      setDevices(devs.filter((d) => d.kind === 'audioinput'));
+      setIsSetupOpen(true);
+    }
   };
 
   const handleSetupConfirm = () => {
-    if (!selectedDeviceId && devices.length > 0) {
-      const first = devices[0];
+    const source = displayDevices;
+    if (!selectedDeviceId && source.length > 0) {
+      const first = source[0];
       setSelectedDeviceId(first.deviceId);
       setDeviceLabel(first.label || 'Default Microphone');
     }
@@ -114,20 +139,25 @@ export function Studio() {
   };
 
   const handleRecord = async () => {
-    if (!deviceLabel && devices.length === 0) { await handleOpenSetup(); return; }
+    if (!deviceLabel && displayDevices.length === 0) { await handleOpenSetup(); return; }
     if (!deviceLabel) { setIsSetupOpen(true); return; }
 
     const stream = await requestMic(selectedDeviceId || undefined);
     if (!stream) return;
     streamRef.current = stream;
 
-    const audioCtx = new AudioContext();
-    const source = audioCtx.createMediaStreamSource(stream);
-    const analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 256;
-    source.connect(analyser);
-    analyserRef.current = analyser;
-    animateMeter(analyser);
+    if (engineReady) {
+      daw.startMeterMonitoring(selectedDeviceId || undefined);
+      daw.startEngineRecording();
+    } else {
+      const audioCtx = new AudioContext();
+      const source = audioCtx.createMediaStreamSource(stream);
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 256;
+      source.connect(analyser);
+      analyserRef.current = analyser;
+      animateMeter(analyser);
+    }
 
     chunksRef.current = [];
     const mr = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm' });
@@ -156,6 +186,9 @@ export function Studio() {
     clearInterval(timerRef.current);
     setIsRecording(false);
     mediaRecorderRef.current?.stop();
+    if (engineReady) {
+      daw.stopEngineRecording();
+    }
   };
 
   const handleStartMastering = () => {
@@ -244,6 +277,18 @@ export function Studio() {
                 {episodes.map((ep) => <option key={ep.id} value={ep.id}>{ep.title}</option>)}
               </select>
             </div>
+            {engineReady && (
+              <>
+                <div className="h-8 w-px bg-gray-200 flex-shrink-0" />
+                <div className="flex items-center gap-1.5 flex-shrink-0">
+                  <ZapIcon className="w-3.5 h-3.5 text-violet-500" />
+                  <span className="text-xs font-medium text-violet-600">{daw.bpm} BPM</span>
+                  {daw.cpuLoad > 0 && (
+                    <span className="text-xs text-gray-400 ml-1">CPU {Math.round(daw.cpuLoad * 100)}%</span>
+                  )}
+                </div>
+              </>
+            )}
           </div>
           <button onClick={() => navigate('/projects')} className="px-4 py-2 border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors flex-shrink-0">Exit Studio</button>
         </header>
@@ -259,6 +304,34 @@ export function Studio() {
                 {item.id}
               </button>
             ))}
+
+            {/* Engine Status */}
+            <div className="mt-auto px-4 pb-2">
+              {daw.status === 'initializing' && (
+                <div className="flex items-center gap-1.5 text-xs text-gray-400">
+                  <div className="w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse" />
+                  Engine loading…
+                </div>
+              )}
+              {daw.status === 'ready' && (
+                <div className="flex items-center gap-1.5 text-xs text-violet-600">
+                  <div className="w-1.5 h-1.5 rounded-full bg-violet-500" />
+                  openDAW ready
+                </div>
+              )}
+              {daw.status === 'unsupported' && (
+                <div className="flex items-center gap-1.5 text-xs text-amber-600">
+                  <div className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                  Basic mode
+                </div>
+              )}
+              {daw.status === 'error' && (
+                <div className="flex items-center gap-1.5 text-xs text-red-500">
+                  <div className="w-1.5 h-1.5 rounded-full bg-red-400" />
+                  Engine error
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Center Content */}
@@ -272,6 +345,29 @@ export function Studio() {
                   <p className="text-sm text-red-600 mt-1">{permissionError}</p>
                 </div>
                 <button onClick={() => setPermissionError('')} className="ml-auto text-red-400 hover:text-red-600"><XIcon className="w-4 h-4" /></button>
+              </div>
+            )}
+
+            {/* Engine unsupported / error notice */}
+            {(daw.status === 'unsupported' || daw.status === 'error') && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-3">
+                <ZapIcon className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-amber-800">
+                    {daw.status === 'unsupported' ? 'Running in basic recording mode' : 'Audio engine failed to start'}
+                  </p>
+                  <p className="text-xs text-amber-700 mt-0.5 leading-relaxed">
+                    {daw.status === 'unsupported'
+                      ? 'Full audio engine requires cross-origin isolation. Recording still works — open the app in a standalone tab for the full experience.'
+                      : daw.error}
+                  </p>
+                </div>
+                <button
+                  onClick={() => window.open(window.location.href, '_blank')}
+                  className="flex-shrink-0 px-3 py-1.5 bg-amber-600 text-white rounded-lg text-xs font-medium hover:bg-amber-700"
+                >
+                  Open standalone
+                </button>
               </div>
             )}
 
@@ -363,14 +459,14 @@ export function Studio() {
 
                 {/* Transport */}
                 <div className="bg-white rounded-xl border border-gray-200 p-6">
-                  <div className="flex items-center gap-8 mb-6">
-                    {/* Input Meter */}
-                    <div className="flex items-center gap-3 w-48">
-                      <MicIcon className="w-5 h-5 text-violet-600" />
-                      <div className="flex-col w-full">
+                  <div className="grid grid-cols-3 items-center gap-4 mb-6">
+                    {/* Left: Input Meter */}
+                    <div className="flex items-center gap-3">
+                      <MicIcon className="w-5 h-5 text-violet-600 flex-shrink-0" />
+                      <div className="flex-col flex-1 min-w-0">
                         <span className="text-xs font-medium text-gray-500 mb-1 block">Input Level</span>
                         <div className="flex gap-0.5 h-4">
-                          {inputLevel.map((v, i) => (
+                          {displayMeterBars.map((v, i) => (
                             <div key={i} className="flex-1 rounded-sm transition-all duration-75"
                               style={{ backgroundColor: v > 0.01 ? (v > 0.8 ? '#ef4444' : v > 0.6 ? '#facc15' : '#22c55e') : '#f3f4f6', height: `${Math.max(2, v * 16)}px`, alignSelf: 'flex-end' }} />
                           ))}
@@ -378,9 +474,12 @@ export function Studio() {
                       </div>
                     </div>
 
-                    {/* Transport Buttons */}
-                    <div className="flex-1 flex justify-center items-center gap-6">
-                      <button className="flex flex-col items-center gap-1 text-gray-400 hover:text-gray-900 transition-colors">
+                    {/* Center: Transport Buttons */}
+                    <div className="flex justify-center items-center gap-6">
+                      <button
+                        onClick={() => engineReady ? daw.seekToStart() : undefined}
+                        title="Rewind to start"
+                        className={`flex flex-col items-center gap-1 transition-colors ${engineReady ? 'text-gray-600 hover:text-gray-900' : 'text-gray-300 cursor-default'}`}>
                         <RewindIcon className="w-5 h-5" />
                         <span className="text-[10px] font-medium uppercase">Rewind</span>
                       </button>
@@ -401,14 +500,17 @@ export function Studio() {
                         </button>
                       )}
 
-                      <button className="flex flex-col items-center gap-1 text-gray-400 hover:text-gray-900 transition-colors">
+                      <button
+                        onClick={() => engineReady ? daw.seekForward() : undefined}
+                        title="Forward 10 seconds"
+                        className={`flex flex-col items-center gap-1 transition-colors ${engineReady ? 'text-gray-600 hover:text-gray-900' : 'text-gray-300 cursor-default'}`}>
                         <FastForwardIcon className="w-5 h-5" />
                         <span className="text-[10px] font-medium uppercase">Forward</span>
                       </button>
                     </div>
 
-                    {/* Save */}
-                    <div className="flex gap-2">
+                    {/* Right: Save / Download */}
+                    <div className="flex gap-2 justify-end">
                       <button className="flex items-center gap-2 px-4 py-2 border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors">
                         <SaveIcon className="w-4 h-4" /> Save
                       </button>
@@ -458,7 +560,7 @@ export function Studio() {
               )}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Audio Input Device</label>
-                {devices.length === 0 ? (
+                {displayDevices.length === 0 ? (
                   <div className="text-sm text-gray-500 py-2">
                     No microphones detected. Make sure a microphone is connected.
                   </div>
@@ -467,12 +569,12 @@ export function Studio() {
                     className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
                     value={selectedDeviceId}
                     onChange={(e) => {
-                      const d = devices.find((dev) => dev.deviceId === e.target.value);
+                      const d = displayDevices.find((dev) => dev.deviceId === e.target.value);
                       setSelectedDeviceId(e.target.value);
                       setDeviceLabel(d?.label || 'Microphone');
                     }}>
                     <option value="">Select a microphone...</option>
-                    {devices.map((d) => (
+                    {displayDevices.map((d) => (
                       <option key={d.deviceId} value={d.deviceId}>{d.label || `Microphone ${d.deviceId.slice(0, 8)}`}</option>
                     ))}
                   </select>
@@ -482,7 +584,7 @@ export function Studio() {
                 <button className="text-sm font-medium text-violet-600 hover:text-violet-700" onClick={() => requestMic(selectedDeviceId || undefined)}>Test Microphone</button>
                 <div className="flex gap-3">
                   <button onClick={() => setIsSetupOpen(false)} className="px-4 py-2 border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50">Cancel</button>
-                  <button onClick={handleSetupConfirm} disabled={devices.length === 0 && !selectedDeviceId} className="px-4 py-2 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-700 disabled:opacity-50">Continue</button>
+                  <button onClick={handleSetupConfirm} disabled={displayDevices.length === 0 && !selectedDeviceId} className="px-4 py-2 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-700 disabled:opacity-50">Continue</button>
                 </div>
               </div>
             </div>
