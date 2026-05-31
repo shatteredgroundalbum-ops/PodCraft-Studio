@@ -11,8 +11,12 @@ export interface DawState {
   isPlaying: boolean;
   isRecording: boolean;
   positionPpqn: number;
+  positionSeconds: number;
   bpm: number;
   cpuLoad: number;
   meterBars: number[];
+  meterPeak: number;
+  meterRms: number;
   devices: Array<{ deviceId: string; label: string }>;
+  inputGain: number;
 }

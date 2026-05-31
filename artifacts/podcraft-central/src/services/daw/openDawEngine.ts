@@ -18,6 +18,7 @@ import { PPQN } from '@opendaw/lib-dsp';
 import type { DawState, EngineStatus } from './types';
 
 const SEEK_SECONDS = 10;
+const SEEK_LARGE_SECONDS = 30;
 const NUM_METER_BARS = 20;
 const EMPTY_BARS = Array<number>(NUM_METER_BARS).fill(0);
 
@@ -30,6 +31,7 @@ class OpenDawEngine {
   private _meterWorklet: MeterWorklet | null = null;
   private _meterStream: MediaStream | null = null;
   private _meterSource: MediaStreamAudioSourceNode | null = null;
+  private _meterGainNode: GainNode | null = null;
   private _meterSub: { terminate(): void } | null = null;
   private _engineSubs: Array<{ terminate(): void }> = [];
   private _listeners = new Set<() => void>();
@@ -41,7 +43,10 @@ class OpenDawEngine {
   private _bpm = 120;
   private _cpuLoad = 0;
   private _meterBars: number[] = [...EMPTY_BARS];
+  private _meterPeak = 0;
+  private _meterRms = 0;
   private _devices: Array<{ deviceId: string; label: string }> = [];
+  private _inputGain = 0.8;
 
   getState(): DawState {
     return {
@@ -50,10 +55,14 @@ class OpenDawEngine {
       isPlaying: this._isPlaying,
       isRecording: this._isRecording,
       positionPpqn: this._positionPpqn,
+      positionSeconds: this._bpm > 0 ? (this._positionPpqn * 60) / (960 * this._bpm) : 0,
       bpm: this._bpm,
       cpuLoad: this._cpuLoad,
       meterBars: this._meterBars,
+      meterPeak: this._meterPeak,
+      meterRms: this._meterRms,
       devices: this._devices,
+      inputGain: this._inputGain,
     };
   }
 
@@ -195,38 +204,55 @@ class OpenDawEngine {
       const stream = await AudioDevices.requestStream(constraints);
       this._meterStream = stream;
       this._meterSource = this._audioContext.createMediaStreamSource(stream);
-      this._meterSource.connect(this._meterWorklet);
+      this._meterGainNode = this._audioContext.createGain();
+      this._meterGainNode.gain.value = this._inputGain;
+      this._meterSource.connect(this._meterGainNode);
+      this._meterGainNode.connect(this._meterWorklet);
       this._meterSub = this._meterWorklet.subscribe(({ peak, rms }) => {
-        const peakVal = Math.max(peak[0] ?? 0, rms[0] ?? 0);
+        const peakVal = peak[0] ?? 0;
+        const rmsVal = rms[0] ?? 0;
+        this._meterPeak = peakVal;
+        this._meterRms = rmsVal;
+        const displayVal = Math.max(peakVal, rmsVal);
         this._meterBars = Array(NUM_METER_BARS)
           .fill(0)
           .map((_, i) => {
             const threshold = i / NUM_METER_BARS;
-            if (peakVal <= 0.01) return 0;
-            if (threshold <= peakVal) return peakVal * (1 - i * 0.015);
+            if (displayVal <= 0.01) return 0;
+            if (threshold <= displayVal) return displayVal * (1 - i * 0.015);
             return 0;
           });
         this._notify();
       });
     } catch {
-      // Permission denied or device unavailable — silent fail
+      // Permission denied or device unavailable
     }
   }
 
   stopMeterMonitoring(): void {
     this._meterSub?.terminate();
     this._meterSub = null;
+    if (this._meterGainNode) {
+      try { this._meterGainNode.disconnect(); } catch { /* ignore */ }
+      this._meterGainNode = null;
+    }
     if (this._meterSource) {
-      try {
-        this._meterSource.disconnect();
-      } catch {
-        // ignore
-      }
+      try { this._meterSource.disconnect(); } catch { /* ignore */ }
       this._meterSource = null;
     }
     this._meterStream?.getTracks().forEach((t) => t.stop());
     this._meterStream = null;
     this._meterBars = [...EMPTY_BARS];
+    this._meterPeak = 0;
+    this._meterRms = 0;
+    this._notify();
+  }
+
+  setInputGain(value: number): void {
+    this._inputGain = Math.max(0, Math.min(1, value));
+    if (this._meterGainNode) {
+      this._meterGainNode.gain.value = this._inputGain;
+    }
     this._notify();
   }
 
@@ -237,6 +263,13 @@ class OpenDawEngine {
       engine.stop(false);
     } else {
       engine.play();
+    }
+  }
+
+  pause(): void {
+    if (!this._project) return;
+    if (this._project.engine.isPlaying.getValue()) {
+      this._project.engine.stop(false);
     }
   }
 
@@ -257,12 +290,30 @@ class OpenDawEngine {
     engine.setPosition(current + pulses);
   }
 
+  seekForwardLarge(): void {
+    if (!this._project) return;
+    const engine = this._project.engine;
+    const current = engine.position.getValue();
+    const bpm = engine.bpm.getValue();
+    const pulses = PPQN.secondsToPulses(SEEK_LARGE_SECONDS, bpm);
+    engine.setPosition(current + pulses);
+  }
+
   seekBackward(): void {
     if (!this._project) return;
     const engine = this._project.engine;
     const current = engine.position.getValue();
     const bpm = engine.bpm.getValue();
     const pulses = PPQN.secondsToPulses(SEEK_SECONDS, bpm);
+    engine.setPosition(Math.max(0, current - pulses));
+  }
+
+  seekBackwardLarge(): void {
+    if (!this._project) return;
+    const engine = this._project.engine;
+    const current = engine.position.getValue();
+    const bpm = engine.bpm.getValue();
+    const pulses = PPQN.secondsToPulses(SEEK_LARGE_SECONDS, bpm);
     engine.setPosition(Math.max(0, current - pulses));
   }
 
@@ -278,16 +329,8 @@ class OpenDawEngine {
     this._engineSubs.forEach((s) => s.terminate());
     this._engineSubs = [];
     this.stopMeterMonitoring();
-    try {
-      this._meterWorklet?.terminate();
-    } catch {
-      // ignore
-    }
-    try {
-      this._project?.terminate();
-    } catch {
-      // ignore
-    }
+    try { this._meterWorklet?.terminate(); } catch { /* ignore */ }
+    try { this._project?.terminate(); } catch { /* ignore */ }
     this._audioContext?.close().catch(() => {});
     this._project = null;
     this._audioContext = null;
