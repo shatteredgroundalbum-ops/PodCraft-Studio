@@ -1,7 +1,9 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './store/AuthStore';
 import { MediaStoreProvider } from './store/MediaStore';
+import { AIConfigProvider, useAIConfig } from './store/AIConfigStore';
+import { AISetupWizard } from './components/AISetupWizard';
 
 import { Splash } from './pages/Splash';
 import { Login } from './pages/Login';
@@ -76,12 +78,29 @@ function AppRoutes() {
   );
 }
 
+function AIWizardController() {
+  const { user } = useAuth();
+  const { config, showWizard, openWizard } = useAIConfig();
+
+  useEffect(() => {
+    if (user && !config.setupComplete && !showWizard) {
+      openWizard();
+    }
+  }, [user, config.setupComplete]);
+
+  if (!showWizard || !user) return null;
+  return <AISetupWizard />;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
         <MediaStoreProvider>
-          <AppRoutes />
+          <AIConfigProvider>
+            <AppRoutes />
+            <AIWizardController />
+          </AIConfigProvider>
         </MediaStoreProvider>
       </AuthProvider>
     </BrowserRouter>

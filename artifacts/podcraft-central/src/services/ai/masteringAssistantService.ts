@@ -1,5 +1,5 @@
 import type { MasteringRecommendation, AIMessage } from './types';
-import { chromeAIAdapter } from './chromeAIAdapter';
+import { aiProviderService } from './aiProviderService';
 
 class MasteringAssistantService {
   getDefaultRecommendation(style: string): MasteringRecommendation {
@@ -71,7 +71,7 @@ class MasteringAssistantService {
         content: `I need mastering recommendations for my podcast episode.\nStyle: ${style}\nNotes about my recording: ${notes}\n\nProvide specific EQ, compression, de-essing, limiting, and noise reduction settings. Keep it practical and actionable.`,
       },
     ];
-    return chromeAIAdapter.prompt(messages, { onChunk });
+    return aiProviderService.prompt(messages, { onChunk });
   }
 
   async analyzeMasteringReadiness(style: string): Promise<string> {

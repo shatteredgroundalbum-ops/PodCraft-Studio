@@ -1,5 +1,5 @@
 import type { ScriptDraft, AIMessage } from './types';
-import { chromeAIAdapter } from './chromeAIAdapter';
+import { aiProviderService } from './aiProviderService';
 
 class ScriptAssistantService {
   async generateScript(topic: string, outline: string[], style: string = 'conversational'): Promise<ScriptDraft> {
@@ -20,7 +20,7 @@ Types: intro | segment | transition | ad-break | outro`,
       },
     ];
 
-    const raw = await chromeAIAdapter.prompt(messages);
+    const raw = await aiProviderService.prompt(messages);
 
     try {
       const jsonMatch = raw.match(/\{[\s\S]*\}/);
@@ -50,7 +50,7 @@ Types: intro | segment | transition | ad-break | outro`,
         content: `Improve this podcast script section.\nInstruction: ${instruction}\n\nOriginal:\n${text}`,
       },
     ];
-    return chromeAIAdapter.prompt(messages, { onChunk });
+    return aiProviderService.prompt(messages, { onChunk });
   }
 
   async generateIntro(topic: string, hostName?: string): Promise<string> {
@@ -60,7 +60,7 @@ Types: intro | segment | transition | ad-break | outro`,
         content: `Write a 30-second podcast intro for an episode about "${topic}".${hostName ? ` Host: ${hostName}.` : ''} Make it engaging and hook the listener.`,
       },
     ];
-    return chromeAIAdapter.prompt(messages);
+    return aiProviderService.prompt(messages);
   }
 
   async generateOutro(topic: string, showName?: string): Promise<string> {
@@ -70,7 +70,7 @@ Types: intro | segment | transition | ad-break | outro`,
         content: `Write a 20-second podcast outro for an episode about "${topic}".${showName ? ` Show: ${showName}.` : ''} Include a CTA to subscribe and leave a review.`,
       },
     ];
-    return chromeAIAdapter.prompt(messages);
+    return aiProviderService.prompt(messages);
   }
 
   async rewriteForClarity(text: string, onChunk?: (c: string) => void): Promise<string> {

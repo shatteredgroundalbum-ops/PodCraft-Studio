@@ -75,6 +75,7 @@
     "zod": "catalog:"
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.2.0",
     "@opendaw/lib-dsp": "^0.0.84",
     "@opendaw/lib-runtime": "^0.0.79",
     "@opendaw/lib-std": "^0.0.78",

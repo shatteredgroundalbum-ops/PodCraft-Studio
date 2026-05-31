@@ -1,5 +1,5 @@
 import type { MicReadiness, RecordingFeedback } from './types';
-import { chromeAIAdapter } from './chromeAIAdapter';
+import { aiProviderService } from './aiProviderService';
 
 class RecordingCoachService {
   analyzeMicLevel(peak: number, rms: number): MicReadiness {
@@ -46,7 +46,7 @@ class RecordingCoachService {
   }
 
   async getRecordingTip(topic: string, onChunk?: (c: string) => void): Promise<string> {
-    return chromeAIAdapter.prompt(
+    return aiProviderService.prompt(
       [{ role: 'user', content: `Give me one quick recording tip for a podcast episode about "${topic}". Keep it under 2 sentences.` }],
       { onChunk }
     );
