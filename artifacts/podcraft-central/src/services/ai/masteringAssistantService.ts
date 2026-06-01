@@ -1,5 +1,7 @@
 import type { MasteringRecommendation, AIMessage } from './types';
 import { PROCESSING_RANGES, QUALITY_OUTCOMES, evaluateRange } from './types';
+import { formatGenreForPrompt, parseGenreLoudness } from './genreProfiles';
+import type { GenreProfile } from './genreProfiles';
 import { aiProviderService } from './aiProviderService';
 
 const R = PROCESSING_RANGES;
@@ -45,12 +47,14 @@ always outperform one at −14 LUFS that sounds squashed or fatiguing.
 
 class MasteringAssistantService {
   /** Starting-point presets — ranges, not fixed values. The AI will adapt. */
-  getDefaultRecommendation(style: string, isMono = false): MasteringRecommendation {
+  getDefaultRecommendation(style: string, isMono = false, genreProfile?: GenreProfile): MasteringRecommendation {
     const stereo = R.loudness.stereoLUFS.goldLow;   // −16
     const mono   = R.loudness.monoLUFS.goldLow;     // −19
     const tp     = R.limiter.ceilingDBTP.goldLow;   // −1
 
-    const targetLUFS = isMono ? mono : stereo;
+    // Genre loudness overrides the default target when specified
+    const genreLUFS = genreProfile ? parseGenreLoudness(genreProfile) : null;
+    const targetLUFS = genreLUFS ?? (isMono ? mono : stereo);
 
     const presets: Record<string, MasteringRecommendation> = {
       Broadcast: {
@@ -146,9 +150,13 @@ class MasteringAssistantService {
     isMono = false,
     voiceCharacter = '',
     micType = '',
+    genreProfile?: GenreProfile,
     onChunk?: (c: string) => void,
   ): Promise<string> {
-    const targetLUFS = isMono ? R.loudness.monoLUFS.goldLow : R.loudness.stereoLUFS.goldLow;
+    const defaultLUFS = isMono ? R.loudness.monoLUFS.goldLow : R.loudness.stereoLUFS.goldLow;
+    const targetLUFS = genreProfile ? parseGenreLoudness(genreProfile) : defaultLUFS;
+    const genreBlock = genreProfile ? `\n${formatGenreForPrompt(genreProfile, 'mastering')}\n` : '';
+
     const messages: AIMessage[] = [{
       role: 'user',
       content: `Provide personalised mastering recommendations for a ${style}-style ${isMono ? 'mono' : 'stereo'} podcast.
@@ -157,10 +165,10 @@ CONTEXT
 Recording notes: ${notes}
 Voice character: ${voiceCharacter || 'not specified'}
 Microphone: ${micType || 'not specified'}
-
+${genreBlock}
 ${MASTERING_RANGE_PROMPT}
 
-Adapt all settings to this specific voice and recording. Explain why each setting suits this context.
+Adapt all settings to this specific voice, recording, and genre profile. When a genre profile is present, its mastering priorities take precedence over style defaults. Explain why each setting suits this context.
 Target: ${targetLUFS} LUFS integrated loudness, ${R.limiter.ceilingDBTP.goldLow} dBTP true peak ceiling.`,
     }];
     return aiProviderService.prompt(messages, { onChunk });

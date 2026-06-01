@@ -19,6 +19,8 @@ import { masteringAssistantService } from '../services/ai/masteringAssistantServ
 import { recordingCoachService } from '../services/ai/recordingCoachService';
 import { qualityScorecardService } from '../services/ai/qualityScorecardService';
 import { scriptAssistantService } from '../services/ai/scriptAssistantService';
+import { GENRE_PROFILES, getGenreProfile } from '../services/ai/genreProfiles';
+import type { GenreProfileId } from '../services/ai/genreProfiles';
 import type {
   ProductionStage, EpisodeConcept, EpisodeBlueprint, ResearchPackage,
   EpisodeOutline, EditRecommendation, MixRecommendation, MasteringRecommendation,
@@ -99,6 +101,10 @@ function StatusChip({ status }: { status: QualityStatus }) {
 
 export function AIProducer() {
   const { config } = useAIConfig();
+
+  // Genre profile
+  const [genreProfileId, setGenreProfileId] = useState<GenreProfileId>('solo-host');
+  const activeGenre = getGenreProfile(genreProfileId);
 
   // Episode context
   const [topic, setTopic]               = useState('');
@@ -279,6 +285,10 @@ export function AIProducer() {
               format,
               hostName,
               duration,
+              'conversational',
+              undefined,
+              undefined,
+              activeGenre,
             )))} />
           <p className="text-xs text-gray-400 mt-1.5">Script will be written for natural spoken delivery — short sentences, conversational tone.</p>
           {errors.script && <p className="text-red-600 text-xs mt-1">{errors.script}</p>}
@@ -435,7 +445,10 @@ export function AIProducer() {
           </div>
         </div>
         <RunBtn label="Generate Mix Recommendations" loading={!!loading.mix}
-          onClick={() => run('mix', async () => setMixRec(await mixingService.generateMixRecommendations(mixStyle, recordingNotes, measuredLUFS ? parseFloat(measuredLUFS) : undefined)))} />
+          onClick={() => run('mix', async () => setMixRec(await mixingService.generateMixRecommendations(
+            mixStyle, recordingNotes, measuredLUFS ? parseFloat(measuredLUFS) : undefined,
+            false, 1, '', '', '', activeGenre,
+          )))} />
 
         {mixRec && (
           <>
@@ -470,7 +483,7 @@ export function AIProducer() {
           </select>
         </div>
         <RunBtn label="Get Mastering Preset" loading={!!loading.mastering}
-          onClick={() => run('mastering', async () => setMasteringRec(masteringAssistantService.getDefaultRecommendation(mixStyle)))} />
+          onClick={() => run('mastering', async () => setMasteringRec(masteringAssistantService.getDefaultRecommendation(mixStyle, false, activeGenre)))} />
 
         {masteringRec && (
           <>
@@ -713,6 +726,27 @@ export function AIProducer() {
           <StarIcon className="w-4 h-4" /> Quality Scorecard
         </button>
       }>
+
+      {/* Genre Profile Selector */}
+      <div className="bg-white border border-gray-200 rounded-xl p-4 mb-3">
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2.5">Podcast Genre</p>
+        <div className="flex flex-wrap gap-2">
+          {GENRE_PROFILES.map(g => (
+            <button key={g.id} onClick={() => setGenreProfileId(g.id as GenreProfileId)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${genreProfileId === g.id ? 'bg-violet-600 border-violet-600 text-white shadow-sm' : 'bg-white border-gray-200 text-gray-600 hover:border-violet-300 hover:bg-violet-50'}`}>
+              <span>{g.emoji}</span> {g.name}
+            </button>
+          ))}
+        </div>
+        <p className="text-xs text-gray-500 mt-2.5 flex items-center gap-2">
+          <span className="font-medium text-gray-700">{activeGenre.emoji} {activeGenre.name}:</span>
+          {activeGenre.tagline}
+          <span className="text-gray-300">·</span>
+          <span className="font-mono text-gray-500">{activeGenre.processing.compression} compression</span>
+          <span className="text-gray-300">·</span>
+          <span className="font-mono text-gray-500">{activeGenre.processing.loudness}</span>
+        </p>
+      </div>
 
       {/* Context bar */}
       <div className="bg-white border border-gray-200 rounded-xl p-4 mb-5 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">

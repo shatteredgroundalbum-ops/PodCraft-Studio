@@ -1,5 +1,7 @@
 import type { MixRecommendation, AIMessage } from '../types';
 import { PROCESSING_RANGES, QUALITY_OUTCOMES, evaluateRange } from '../types';
+import { formatGenreForPrompt } from '../genreProfiles';
+import type { GenreProfile } from '../genreProfiles';
 import { aiProviderService } from '../aiProviderService';
 
 // ─── Range tables formatted for AI prompts ────────────────────────────────────
@@ -139,15 +141,20 @@ class MixingService {
     voiceCharacter = '',
     micType = '',
     roomCondition = '',
+    genreProfile?: GenreProfile,
   ): Promise<MixRecommendation> {
     const loudnessRange = isMono ? R.loudness.monoLUFS : R.loudness.stereoLUFS;
     const targetLUFS = loudnessRange.goldLow;
     const loudnessEval = measuredLUFS !== undefined ? this.evaluateLoudness(measuredLUFS, isMono) : null;
 
+    const genreBlock = genreProfile
+      ? `\n${formatGenreForPrompt(genreProfile, 'mixing')}\n`
+      : '';
+
     const messages: AIMessage[] = [
       {
         role: 'system',
-        content: `You are a professional podcast mix engineer. Aim for the gold zone in every parameter. Adapt all settings to the actual voice, microphone, and room conditions. Never hard-code fixed values when context requires different settings. Respond with valid JSON only.`,
+        content: `You are a professional podcast mix engineer. Aim for the gold zone in every parameter. Adapt all settings to the actual voice, microphone, room conditions, and genre profile. Never hard-code fixed values when context requires different settings. Respond with valid JSON only.`,
       },
       {
         role: 'user',
@@ -160,10 +167,10 @@ Microphone: ${micType || 'not specified — use balanced gold-zone defaults'}
 Room: ${roomCondition || 'not specified — assume some treatment needed'}
 Recording notes: ${recordingNotes || 'none'}
 ${measuredLUFS !== undefined ? `Measured loudness: ${measuredLUFS} LUFS (${loudnessEval?.note ?? ''})` : 'Loudness: not yet measured'}
-
+${genreBlock}
 ${RANGE_PROMPT}
 
-Provide specific settings that are adapted to this voice/mic/room, staying within the gold zones unless context requires adjustment. Explain each choice.
+Provide specific settings that are adapted to this voice/mic/room and genre profile, staying within the gold zones unless context requires adjustment. When a genre profile is present, use its processing targets as the primary guide. Explain each choice.
 
 JSON:
 {

@@ -1,5 +1,7 @@
 import type { ScriptDraft, AIMessage, FinalScriptQuality, ScriptDimensionScore, ScriptQualityStatus } from './types';
 import { SCRIPT_TIMING, estimateRuntimeMinutes } from './types';
+import { formatGenreForPrompt } from './genreProfiles';
+import type { GenreProfile } from './genreProfiles';
 import { aiProviderService } from './aiProviderService';
 
 // ─── Formal Specification ─────────────────────────────────────────────────────
@@ -118,8 +120,13 @@ class ScriptAssistantService {
     style = 'conversational',
     episodeNumber?: number,
     guests?: string[],
+    genreProfile?: GenreProfile,
   ): Promise<ScriptDraft> {
     const targetWords = durationMinutes * 150;
+    const genreBlock = genreProfile
+      ? `\n${formatGenreForPrompt(genreProfile, 'script')}\n`
+      : '';
+
     const messages: AIMessage[] = [
       { role: 'system', content: SCRIPT_SYSTEM },
       {
@@ -134,6 +141,7 @@ ${hostName ? `Host: ${hostName}` : ''}
 ${guests?.length ? `Guests: ${guests.join(', ')}` : ''}
 ${episodeNumber ? `Episode: #${episodeNumber}` : ''}
 Content outline: ${outline.join(', ')}
+${genreBlock}
 
 REQUIRED SECTIONS (in order):
 1. COLD OPEN   (15–60 sec) — hook that demands the listener keep listening
