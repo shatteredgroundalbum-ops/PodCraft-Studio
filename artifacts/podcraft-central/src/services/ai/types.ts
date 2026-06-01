@@ -83,6 +83,112 @@ export interface RecordingFeedback {
   timestamp: number;
 }
 
+// ─── Recording Readiness ──────────────────────────────────────────────────────
+
+export type EnvironmentStatus = 'green' | 'yellow' | 'red';
+
+export type RecordingReadinessLevel =
+  | 'ready'              // 90–100
+  | 'acceptable'         // 75–89
+  | 'needs-improvement'  // 60–74
+  | 'not-ready';         // < 60
+
+export interface ReadinessMetric {
+  status: EnvironmentStatus;
+  note: string;
+  recommendation?: string;
+}
+
+export interface RoomNoiseAssessment {
+  ambientNoiseDB?: number;
+  ambientNoiseStatus: EnvironmentStatus;
+  hvacFanNoise: ReadinessMetric;
+  trafficNoise: ReadinessMetric;
+  echoReverb: ReadinessMetric;
+  keyboardNoise: ReadinessMetric;
+  chairNoise: ReadinessMetric;
+  petChildNoise: ReadinessMetric;
+  overallStatus: EnvironmentStatus;
+  issues: string[];
+  recommendations: string[];
+}
+
+export interface MicAssessment {
+  micDetected: boolean;
+  micName?: string;
+  distanceEstimate: ReadinessMetric;
+  popFilter: ReadinessMetric;
+  inputSignalPresent: boolean;
+  peakLevelDB?: number;
+  peakStatus: EnvironmentStatus;
+  clippingEvents: number;
+  mouthNoise: ReadinessMetric;
+  overallStatus: EnvironmentStatus;
+  issues: string[];
+  recommendations: string[];
+}
+
+export interface RecordingEnvironmentAssessment {
+  roomEcho: ReadinessMetric;
+  reflections: ReadinessMetric;
+  backgroundHum: ReadinessMetric;
+  computerFanNoise: ReadinessMetric;
+  outsideNoise: ReadinessMetric;
+  overallStatus: EnvironmentStatus;
+  issues: string[];
+  recommendations: string[];
+}
+
+export interface RecordingReadinessScore {
+  score: number;
+  level: RecordingReadinessLevel;
+  statusLabel: string;
+  environmentStatus: EnvironmentStatus;
+  roomNoise: RoomNoiseAssessment;
+  micSetup: MicAssessment;
+  environment: RecordingEnvironmentAssessment;
+  blockers: string[];
+  warnings: string[];
+  approvedByUser: boolean;
+}
+
+// ─── Script Quality ───────────────────────────────────────────────────────────
+
+export type ScriptSectionType =
+  | 'metadata'
+  | 'cold-open'
+  | 'intro'
+  | 'segment'
+  | 'guest-section'
+  | 'sponsor'
+  | 'recap'
+  | 'outro'
+  | 'transition'
+  | 'ad-break';
+
+export type ScriptQualityStatus = 'pass' | 'needs-review' | 'fail';
+
+export interface ScriptDimensionScore {
+  score: number;
+  status: ScriptQualityStatus;
+  feedback: string;
+  improvements: string[];
+}
+
+export interface FinalScriptQuality {
+  hookQuality: ScriptDimensionScore;
+  clarity: ScriptDimensionScore;
+  flow: ScriptDimensionScore;
+  researchQuality: ScriptDimensionScore;
+  listenerEngagement: ScriptDimensionScore;
+  segmentBalance: ScriptDimensionScore;
+  outroQuality: ScriptDimensionScore;
+  overallScore: number;
+  overallStatus: ScriptQualityStatus;
+  requiresUserApproval: boolean;
+  approvedForRecording: boolean;
+}
+
 export interface ResearchResult {
   topic: string;
   outline: string[];
@@ -93,13 +199,24 @@ export interface ResearchResult {
 
 export interface ScriptDraft {
   title: string;
+  episodeNumber?: number;
+  recordingDate?: string;
+  host?: string;
+  guests?: string[];
+  topic?: string;
+  wordCount?: number;
   sections: Array<{
-    type: 'intro' | 'segment' | 'transition' | 'ad-break' | 'outro';
+    type: ScriptSectionType;
     title: string;
     content: string;
     estimatedSeconds?: number;
+    objective?: string;
+    talkingPoints?: string[];
+    retentionHook?: string;
   }>;
   totalEstimatedMinutes: number;
+  qualityCheck?: FinalScriptQuality;
+  approvedForRecording?: boolean;
 }
 
 export interface MasteringRecommendation {
@@ -300,6 +417,57 @@ export const PODCAST_STANDARDS = {
   musicPlatformLUFS: -14,   // Spotify streaming master (music-heavy only)
   maxClipDB:           0,   // 0 dBFS absolute clipping threshold
 } as const;
+
+// ─── Recording Readiness Standards (formal spec) ─────────────────────────────
+// Min Acceptable / Gold Standard / Maximum Allowed for each metric.
+// Qualitative thresholds use descriptive strings; numeric thresholds use numbers.
+export const RECORDING_STANDARDS = {
+  roomNoise: {
+    ambientNoiseDB:  { min: -50,          goldLow: -70, goldHigh: -60, max: -45,           unit: 'dB' },
+    hvacFanNoise:    { min: 'audible',     gold: 'barely detectable',   max: 'clearly audible'          },
+    trafficNoise:    { min: 'occasional',  gold: 'none',                max: 'frequent'                  },
+    echoReverb:      { min: 'mild',        gold: 'minimal',             max: 'obvious'                   },
+    keyboardNoise:   { min: 'occasional',  gold: 'none',                max: 'frequent'                  },
+    chairNoise:      { min: 'occasional',  gold: 'none',                max: 'frequent'                  },
+    petChildNoise:   { min: 'rare',        gold: 'none',                max: 'any recurring noise'       },
+  },
+  micCheck: {
+    distanceIn:     { min: '10–12 in',    gold: '4–8 in',              max: '2 in'                      },
+    popFilter:      { min: 'optional',    gold: 'recommended',         max: 'required (plosive speaker)'},
+    peakLevelDB:    { min: -20,           goldLow: -18, goldHigh: -12, max: -6,            unit: 'dBFS' },
+    clipping:       'Any clipping event = recording failure — do not distribute',
+    mouthNoise:     { min: 'noticeable',  gold: 'minimal',             max: 'excessive'                 },
+  },
+  environment: {
+    roomEcho:       { min: 'mild',        gold: 'minimal',             max: 'obvious'                   },
+    reflections:    { min: 'noticeable',  gold: 'controlled',          max: 'excessive'                 },
+    backgroundHum:  { min: 'low',         gold: 'none',                max: 'audible'                   },
+    computerFan:    { min: 'low',         gold: 'none',                max: 'audible'                   },
+    outsideNoise:   { min: 'rare',        gold: 'none',                max: 'frequent'                  },
+  },
+  readinessScore: {
+    ready:            { min: 90, max: 100, label: 'Ready to Record',   status: 'green'  as EnvironmentStatus },
+    acceptable:       { min: 75, max: 89,  label: 'Acceptable',        status: 'green'  as EnvironmentStatus },
+    needsImprovement: { min: 60, max: 74,  label: 'Needs Improvement', status: 'yellow' as EnvironmentStatus },
+    notReady:         { min: 0,  max: 59,  label: 'Not Ready',         status: 'red'    as EnvironmentStatus },
+  },
+} as const;
+
+// ─── Script Timing ────────────────────────────────────────────────────────────
+// Standard spoken podcast pace: ~150 words per minute
+export const SCRIPT_TIMING = [
+  { words: 150,  minutes: 1  },
+  { words: 750,  minutes: 5  },
+  { words: 1500, minutes: 10 },
+  { words: 3000, minutes: 20 },
+  { words: 4500, minutes: 30 },
+  { words: 9000, minutes: 60 },
+] as const;
+
+/** Estimate spoken runtime from word count at 150 wpm. */
+export function estimateRuntimeMinutes(wordCount: number): number {
+  return Math.round(wordCount / 150);
+}
 
 // ─── Processing Ranges ────────────────────────────────────────────────────────
 // Each parameter has Min (too little) / Gold Zone / Max (too much / danger).

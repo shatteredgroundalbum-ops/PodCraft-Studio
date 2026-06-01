@@ -290,9 +290,16 @@ export function AIProducer() {
             <div className="space-y-3">
               {script.sections.map((s, i) => {
                 const typeColors: Record<string, string> = {
-                  intro: 'bg-violet-100 text-violet-700', segment: 'bg-blue-100 text-blue-700',
-                  transition: 'bg-gray-100 text-gray-600', 'ad-break': 'bg-orange-100 text-orange-700',
-                  outro: 'bg-green-100 text-green-700',
+                  metadata:       'bg-slate-100 text-slate-600',
+                  'cold-open':    'bg-yellow-100 text-yellow-700',
+                  intro:          'bg-violet-100 text-violet-700',
+                  segment:        'bg-blue-100 text-blue-700',
+                  'guest-section':'bg-indigo-100 text-indigo-700',
+                  sponsor:        'bg-orange-100 text-orange-700',
+                  recap:          'bg-teal-100 text-teal-700',
+                  outro:          'bg-green-100 text-green-700',
+                  transition:     'bg-gray-100 text-gray-500',
+                  'ad-break':     'bg-orange-100 text-orange-700',
                 };
                 return (
                   <div key={i} className="border border-gray-200 rounded-lg overflow-hidden">
