@@ -1,5 +1,5 @@
 import type { ResearchResult, AIMessage } from './types';
-import { aiProviderService } from './aiProviderService';
+import { aiProducerService } from './aiProducerService';
 
 class ResearchAssistantService {
   async generateResearch(topic: string, notes?: string): Promise<ResearchResult> {
@@ -17,7 +17,7 @@ Format as JSON with keys: outline (array), researchQuestions (array), keyPoints 
       },
     ];
 
-    const raw = await aiProviderService.prompt(messages);
+    const raw = await aiProducerService.runTask('research', messages);
 
     try {
       const jsonMatch = raw.match(/\{[\s\S]*\}/);
@@ -50,7 +50,7 @@ Format as JSON with keys: outline (array), researchQuestions (array), keyPoints 
       { role: 'system', content: `Context: Researching podcast episode about: ${context}` },
       { role: 'user', content: question },
     ];
-    return aiProviderService.prompt(messages, { onChunk });
+    return aiProducerService.runTask('research', messages, { onChunk });
   }
 }
 

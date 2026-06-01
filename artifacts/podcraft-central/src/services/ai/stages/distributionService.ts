@@ -2,7 +2,7 @@ import type {
   DistributionPackage, PlatformRequirement, EpisodePackage,
   DistributionPlatform, ExportFormat, AIMessage,
 } from '../types';
-import { aiProviderService } from '../aiProviderService';
+import { aiProducerService } from '../aiProducerService';
 
 const PLATFORM_DATA: Record<DistributionPlatform, Omit<PlatformRequirement, 'ready'>> = {
   spotify: {
@@ -78,7 +78,7 @@ Provide 8-10 specific steps.`,
     let distributionNotes = '';
 
     try {
-      const raw = await aiProviderService.prompt(messages);
+      const raw = await aiProducerService.runTask('distribution', messages);
       const m = raw.match(/\{[\s\S]*\}/);
       if (m) {
         const p = JSON.parse(m[0]);

@@ -2,7 +2,7 @@ import type { MasteringRecommendation, AIMessage } from './types';
 import { PROCESSING_RANGES, QUALITY_OUTCOMES, evaluateRange } from './types';
 import { formatGenreForPrompt, parseGenreLoudness } from './genreProfiles';
 import type { GenreProfile } from './genreProfiles';
-import { aiProviderService } from './aiProviderService';
+import { aiProducerService } from './aiProducerService';
 
 const R = PROCESSING_RANGES;
 
@@ -171,7 +171,7 @@ ${MASTERING_RANGE_PROMPT}
 Adapt all settings to this specific voice, recording, and genre profile. When a genre profile is present, its mastering priorities take precedence over style defaults. Explain why each setting suits this context.
 Target: ${targetLUFS} LUFS integrated loudness, ${R.limiter.ceilingDBTP.goldLow} dBTP true peak ceiling.`,
     }];
-    return aiProviderService.prompt(messages, { onChunk });
+    return aiProducerService.runTask('mastering', messages, { onChunk });
   }
 }
 

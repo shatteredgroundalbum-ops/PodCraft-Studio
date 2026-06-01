@@ -1,6 +1,6 @@
 export type {
   AIAvailability, AIMessage, AIRequestOptions, AIProviderInfo,
-  AIConfig, AIAdapter, AIProviderMode, ByokProvider,
+  AIConfig, AIAdapter, AIProviderMode, ByokProvider, AITaskType,
   MicReadiness, RecordingFeedback, ResearchResult, ScriptDraft, MasteringRecommendation,
   ProductionStage, EpisodeSegment, EpisodeConcept, EpisodePlan, ChecklistItem, EpisodeBlueprint,
   ResearchSource, ResearchPackage, OutlineSection, EpisodeOutline,
@@ -14,6 +14,7 @@ export { BYOK_PROVIDER_NAMES, BYOK_PROVIDER_MODELS } from './types';
 
 export { aiProducerService } from './aiProducerService';
 export { aiProviderService } from './aiProviderService';
+export { aiProviderRouter } from './aiProviderRouter';
 export { phi3MiniAdapter, PHI3_SIZE_MB } from './phi3MiniAdapter';
 export { geminiNanoAdapter } from './geminiNanoAdapter';
 export { hybridAiRouter } from './hybridAiRouter';

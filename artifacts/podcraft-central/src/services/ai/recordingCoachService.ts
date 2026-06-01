@@ -10,7 +10,7 @@ import {
   CALIBRATION_STEPS,
   type MicProfile, type InterfaceProfile, type CalibrationSession,
 } from './deviceProfiles';
-import { aiProviderService } from './aiProviderService';
+import { aiProducerService } from './aiProducerService';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -267,7 +267,7 @@ JSON:
     }];
 
     try {
-      const raw = await aiProviderService.prompt(messages);
+      const raw = await aiProducerService.runTask('recording-check', messages);
       const m = raw.match(/\{[\s\S]*\}/);
       if (m) return JSON.parse(m[0]) as Record<string, string>;
     } catch { /* ignore */ }
@@ -463,7 +463,7 @@ For each relevant parameter, state:
 Then provide a concise session setup checklist.`,
     }];
 
-    const result = await aiProviderService.prompt(messages, { onChunk: input.onChunk });
+    const result = await aiProducerService.runTask('recording-check', messages, { onChunk: input.onChunk });
 
     return {
       micId: mic?.id,
@@ -480,7 +480,7 @@ Then provide a concise session setup checklist.`,
   }
 
   async getRecordingTip(topic: string, onChunk?: (c: string) => void): Promise<string> {
-    return aiProviderService.prompt(
+    return aiProducerService.runTask('recording-check', 
       [{ role: 'user', content: `Give me one quick recording tip for a podcast episode about "${topic}". Focus on microphone technique, room acoustics, or level setting. Under 2 sentences.` }],
       { onChunk },
     );

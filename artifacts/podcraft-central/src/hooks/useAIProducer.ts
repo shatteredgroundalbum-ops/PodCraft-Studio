@@ -64,8 +64,8 @@ export function useAIProducer(): UseAIProducer {
     setStreamingText('');
     let accumulated = '';
     try {
-      await aiProducerService.chat([...messages, userMsg], {
-        onChunk: (chunk) => {
+      await aiProducerService.runTask('chat', [...messages, userMsg], {
+        onChunk: (chunk: string) => {
           accumulated += chunk;
           setStreamingText(accumulated);
         },

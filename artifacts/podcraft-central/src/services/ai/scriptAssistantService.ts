@@ -2,7 +2,7 @@ import type { ScriptDraft, AIMessage, FinalScriptQuality, ScriptDimensionScore, 
 import { SCRIPT_TIMING, estimateRuntimeMinutes } from './types';
 import { formatGenreForPrompt } from './genreProfiles';
 import type { GenreProfile } from './genreProfiles';
-import { aiProviderService } from './aiProviderService';
+import { aiProducerService } from './aiProducerService';
 
 // ─── Formal Specification ─────────────────────────────────────────────────────
 // All script generation and quality checks operate against this spec.
@@ -180,7 +180,7 @@ Respond with JSON:
       },
     ];
 
-    const raw = await aiProviderService.prompt(messages);
+    const raw = await aiProducerService.runTask('script-draft', messages);
 
     try {
       const m = raw.match(/\{[\s\S]*\}/);
@@ -261,7 +261,7 @@ JSON:
     }];
 
     try {
-      const raw = await aiProviderService.prompt(messages);
+      const raw = await aiProducerService.runTask('script-draft', messages);
       const m = raw.match(/\{[\s\S]*\}/);
       if (m) {
         const p = JSON.parse(m[0]);
@@ -316,7 +316,7 @@ Script: ${scriptContent.slice(0, 2000)}
 Evaluate: naturalness, sentences over 25 words, hook strength, transitions, outro with CTA, unsourced facts.
 JSON: { "canReadNaturally": true, "hookStrength": "strong|weak|missing", "hasOutro": true, "hasTransitions": true, "longSentenceCount": 3, "issues": [], "overallReady": true }`,
     }];
-    const raw = await aiProviderService.prompt(messages);
+    const raw = await aiProducerService.runTask('script-draft', messages);
     try {
       const m = raw.match(/\{[\s\S]*\}/);
       if (m) return JSON.parse(m[0]) as ScriptQualityCheck;
@@ -331,7 +331,7 @@ JSON: { "canReadNaturally": true, "hookStrength": "strong|weak|missing", "hasOut
 Content: ${content.slice(0, 1500)}
 JSON: { "statements": [{ "text": "...", "type": "confirmed-fact|claim|allegation|theory|speculation", "requiresSource": true, "sourceNote": "..." }] }`,
     }];
-    const raw = await aiProviderService.prompt(messages);
+    const raw = await aiProducerService.runTask('script-draft', messages);
     try {
       const m = raw.match(/\{[\s\S]*\}/);
       if (m) return (JSON.parse(m[0]).statements ?? []) as LabelledStatement[];
@@ -340,14 +340,14 @@ JSON: { "statements": [{ "text": "...", "type": "confirmed-fact|claim|allegation
   }
 
   async improveText(text: string, instruction: string, onChunk?: (c: string) => void): Promise<string> {
-    return aiProviderService.prompt([{
+    return aiProducerService.runTask('script-draft', [{
       role: 'user',
       content: `Improve this podcast script section.\nInstruction: ${instruction}\n\nOriginal:\n${text}\n\nRules: short sentences (≤25 words), conversational, sounds natural when spoken aloud.`,
     }], { onChunk });
   }
 
   async generateIntro(topic: string, hostName?: string, showName?: string): Promise<string> {
-    return aiProviderService.prompt([{
+    return aiProducerService.runTask('script-draft', [{
       role: 'user',
       content: `Write a 30–90 second podcast intro for an episode about "${topic}".
 ${hostName ? `Host: ${hostName}.` : ''} ${showName ? `Show: ${showName}.` : ''}
@@ -357,7 +357,7 @@ Short sentences. Conversational. Just the spoken words — no stage directions.`
   }
 
   async generateOutro(topic: string, showName?: string): Promise<string> {
-    return aiProviderService.prompt([{
+    return aiProducerService.runTask('script-draft', [{
       role: 'user',
       content: `Write a 30–60 second podcast outro for an episode about "${topic}".${showName ? ` Show: ${showName}.` : ''}
 Include ALL of: specific subscribe CTA, review reminder, website/social links, next episode tease.

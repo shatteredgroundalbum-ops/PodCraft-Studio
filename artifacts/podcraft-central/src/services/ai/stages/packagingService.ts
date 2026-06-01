@@ -1,5 +1,5 @@
 import type { EpisodePackage, SocialCopySet, AIMessage, EpisodeOutline } from '../types';
-import { aiProviderService } from '../aiProviderService';
+import { aiProducerService } from '../aiProducerService';
 
 const SYS = 'You are an expert podcast content strategist and copywriter specializing in SEO-optimized podcast distribution. Respond with valid JSON when requested.';
 
@@ -44,7 +44,7 @@ Generate 5-8 chapters and 8-12 keywords.`,
       },
     ];
 
-    const raw = await aiProviderService.prompt(messages);
+    const raw = await aiProducerService.runTask('packaging', messages);
     try {
       const m = raw.match(/\{[\s\S]*\}/);
       if (m) return JSON.parse(m[0]) as EpisodePackage;
@@ -59,7 +59,7 @@ Generate 5-8 chapters and 8-12 keywords.`,
   }
 
   async generateSocialCopy(title: string, description: string, highlights: string[] = []): Promise<SocialCopySet> {
-    const raw = await aiProviderService.prompt([{
+    const raw = await aiProducerService.runTask('packaging', [{
       role: 'user',
       content: `Create social media copy for podcast episode: "${title}"
 Description: ${description}
@@ -74,7 +74,7 @@ JSON: { "twitter": "...", "linkedin": "...", "instagram": "...", "newsletter": "
   }
 
   async generateShowNotes(topic: string, keyPoints: string[], guestName = '', onChunk?: (c: string) => void): Promise<string> {
-    return aiProviderService.prompt([{
+    return aiProducerService.runTask('packaging', [{
       role: 'user',
       content: `Write detailed show notes for a podcast episode about "${topic}".
 ${guestName ? `Guest: ${guestName}` : ''}
@@ -84,7 +84,7 @@ Include: episode summary, timestamp placeholders, key topics, resources/links se
   }
 
   async generateKeywords(title: string, description: string, topic: string): Promise<string[]> {
-    const raw = await aiProviderService.prompt([{
+    const raw = await aiProducerService.runTask('packaging', [{
       role: 'user',
       content: `Generate 15 SEO keywords for a podcast episode.
 Title: "${title}" | Topic: "${topic}" | Description: "${description}"

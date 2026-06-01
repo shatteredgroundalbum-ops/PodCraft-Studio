@@ -2,13 +2,13 @@ import type {
   EpisodeBlueprint, EpisodeConcept, EpisodePlan, EpisodeSegment,
   ChecklistItem, AIMessage, ProductionStage,
 } from '../types';
-import { aiProviderService } from '../aiProviderService';
+import { aiProducerService } from '../aiProducerService';
 
 const SYS = 'You are an expert podcast producer and showrunner. Respond with valid JSON when requested.';
 
 class PlanningService {
   async generateTopicIdeas(showContext: string, recentTopics: string[] = [], count = 6): Promise<string[]> {
-    const raw = await aiProviderService.prompt([
+    const raw = await aiProducerService.runTask('planning', [
       { role: 'system', content: SYS },
       {
         role: 'user',
@@ -73,7 +73,7 @@ Include 5-8 segments. Include 16-20 checklist items covering ALL production stag
       },
     ];
 
-    const raw = await aiProviderService.prompt(messages);
+    const raw = await aiProducerService.runTask('planning', messages);
     try {
       const m = raw.match(/\{[\s\S]*\}/);
       if (m) {
@@ -111,7 +111,7 @@ Include 5-8 segments. Include 16-20 checklist items covering ALL production stag
   }
 
   async generateContentStrategy(showName: string, episodesPerMonth: number, onChunk?: (c: string) => void): Promise<string> {
-    return aiProviderService.prompt([{
+    return aiProducerService.runTask('planning', [{
       role: 'user',
       content: `Create a 3-month content strategy for "${showName}" publishing ${episodesPerMonth} episodes/month.
 Cover: episode themes, guest types, audience engagement tactics, growth opportunities, seasonal relevance.
@@ -120,7 +120,7 @@ Be specific and actionable. Under 300 words.`,
   }
 
   async generateAudienceAnalysis(showName: string, topic: string, onChunk?: (c: string) => void): Promise<string> {
-    return aiProviderService.prompt([{
+    return aiProducerService.runTask('planning', [{
       role: 'user',
       content: `Analyse the target audience for a podcast episode about "${topic}" on the show "${showName}".
 Cover: demographics, interests, knowledge level, why they'd tune in, what they need to hear.

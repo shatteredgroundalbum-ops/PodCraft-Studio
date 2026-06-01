@@ -1,5 +1,5 @@
 import type { ResearchPackage, EpisodeOutline, AIMessage, EpisodeConcept } from '../types';
-import { aiProviderService } from '../aiProviderService';
+import { aiProducerService } from '../aiProducerService';
 
 const SYS = 'You are an expert podcast research assistant and pre-production specialist. Respond with valid JSON when requested.';
 
@@ -26,7 +26,7 @@ Include 5-7 sources, 5+ key facts, 3+ statistics, 2+ controversies, 3+ expert pe
       },
     ];
 
-    const raw = await aiProviderService.prompt(messages);
+    const raw = await aiProducerService.runTask('pre-production', messages);
     try {
       const m = raw.match(/\{[\s\S]*\}/);
       if (m) return JSON.parse(m[0]) as ResearchPackage;
@@ -69,7 +69,7 @@ Include 6-10 sections.`,
       },
     ];
 
-    const raw = await aiProviderService.prompt(messages);
+    const raw = await aiProducerService.runTask('pre-production', messages);
     try {
       const m = raw.match(/\{[\s\S]*\}/);
       if (m) return JSON.parse(m[0]) as EpisodeOutline;
@@ -86,7 +86,7 @@ Include 6-10 sections.`,
   }
 
   async generateInterviewQuestions(guestName: string, topic: string, angle = ''): Promise<string[]> {
-    const raw = await aiProviderService.prompt([{
+    const raw = await aiProducerService.runTask('pre-production', [{
       role: 'user',
       content: `Generate 12 thoughtful interview questions for a podcast conversation with ${guestName} about "${topic}".${angle ? ` Angle: ${angle}` : ''}
 Include: warm-up, core exploration, unique insights, audience value questions, and a memorable closer.
@@ -100,7 +100,7 @@ JSON: { "questions": ["..."] }`,
   }
 
   async generateProductionNotes(topic: string, format: string, specialRequirements = '', onChunk?: (c: string) => void): Promise<string> {
-    return aiProviderService.prompt([{
+    return aiProducerService.runTask('pre-production', [{
       role: 'user',
       content: `Write concise production notes for a ${format} podcast episode about "${topic}".${specialRequirements ? ` Special requirements: ${specialRequirements}` : ''}
 Cover: recording setup, timing, and any special considerations. Under 200 words.`,

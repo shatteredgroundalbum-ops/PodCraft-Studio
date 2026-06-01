@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { useAIConfig } from '../store/AIConfigStore';
 import { phi3MiniAdapter, PHI3_SIZE_MB } from '../services/ai/phi3MiniAdapter';
+import { aiProducerService } from '../services/ai/aiProducerService';
 import { aiProviderService } from '../services/ai/aiProviderService';
 import { BYOK_PROVIDER_NAMES } from '../services/ai/types';
 import type { AIProviderMode } from '../services/ai/types';
@@ -77,7 +78,7 @@ function AISettingsPage() {
     setTestResult('');
     setTestError('');
     try {
-      const result = await aiProviderService.prompt([{ role: 'user', content: testInput }]);
+      const result = await aiProducerService.runTask('chat', [{ role: 'user', content: testInput }]);
       setTestResult(result);
     } catch (e) {
       setTestError(e instanceof Error ? e.message : 'Test failed.');

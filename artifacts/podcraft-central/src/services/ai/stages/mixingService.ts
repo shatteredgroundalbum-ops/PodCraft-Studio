@@ -2,7 +2,7 @@ import type { MixRecommendation, AIMessage } from '../types';
 import { PROCESSING_RANGES, QUALITY_OUTCOMES, evaluateRange } from '../types';
 import { formatGenreForPrompt } from '../genreProfiles';
 import type { GenreProfile } from '../genreProfiles';
-import { aiProviderService } from '../aiProviderService';
+import { aiProducerService } from '../aiProducerService';
 
 // ─── Range tables formatted for AI prompts ────────────────────────────────────
 
@@ -187,7 +187,7 @@ JSON:
       },
     ];
 
-    const raw = await aiProviderService.prompt(messages);
+    const raw = await aiProducerService.runTask('mixing', messages);
     try {
       const m = raw.match(/\{[\s\S]*\}/);
       if (m) {

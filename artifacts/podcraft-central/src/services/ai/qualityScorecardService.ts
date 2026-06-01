@@ -4,7 +4,7 @@ import type {
   ExportFormat,
 } from './types';
 import { PROCESSING_RANGES, QUALITY_OUTCOMES, PODCAST_STANDARDS, evaluateRange } from './types';
-import { aiProviderService } from './aiProviderService';
+import { aiProducerService } from './aiProducerService';
 
 const R = PROCESSING_RANGES;
 
@@ -167,7 +167,7 @@ JSON:
     ];
 
     try {
-      const raw = await aiProviderService.prompt(messages);
+      const raw = await aiProducerService.runTask('quality-check', messages);
       const m = raw.match(/\{[\s\S]*\}/);
       if (m) {
         const parsed = JSON.parse(m[0]);

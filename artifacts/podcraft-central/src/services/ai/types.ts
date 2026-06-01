@@ -607,6 +607,29 @@ export interface QualityScorecard {
   generatedAt: string;
 }
 
+// ─── AI Task Types ────────────────────────────────────────────────────────────
+// Every AI call in AI Producer carries a task type.
+// The AI Provider Router uses this to select the best adapter.
+// In Hybrid mode, task type drives routing:
+//   recording-check/summary/chat → Gemini Nano (fast, device)
+//   script-draft/mastering/mixing/etc. → Phi-3 Mini (quality, local)
+//   research → BYOK preferred (needs larger context window)
+
+export type AITaskType =
+  | 'recording-check'   // quick audio/environment analysis — prefer Nano / local
+  | 'script-draft'      // full script generation — prefer Phi-3 or BYOK
+  | 'research'          // deep research & fact-finding — prefer BYOK (larger context)
+  | 'summary'           // quick summarization — prefer Nano
+  | 'mastering'         // mastering preset suggestions — prefer Phi-3
+  | 'mixing'            // mixing recommendations — prefer Phi-3
+  | 'planning'          // episode planning / blueprint — prefer Phi-3
+  | 'pre-production'    // outline, research package — prefer Phi-3
+  | 'post-production'   // edit recommendations — prefer Phi-3
+  | 'packaging'         // show notes, metadata, social copy — prefer Phi-3
+  | 'distribution'      // distribution checklist & export — prefer Phi-3
+  | 'quality-check'     // quality scorecard evaluation — prefer Phi-3
+  | 'chat';             // generic / fallback
+
 // Approval system
 export type ApprovalImpact = 'low' | 'medium' | 'high' | 'destructive';
 

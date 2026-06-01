@@ -1,5 +1,5 @@
 import type { EditRecommendation, AIMessage } from '../types';
-import { aiProviderService } from '../aiProviderService';
+import { aiProducerService } from '../aiProducerService';
 
 class PostProductionService {
   async generateEditRecommendations(
@@ -33,7 +33,7 @@ Provide 4-8 edit points and 4-6 cleanup suggestions.`,
       },
     ];
 
-    const raw = await aiProviderService.prompt(messages);
+    const raw = await aiProducerService.runTask('post-production', messages);
     try {
       const m = raw.match(/\{[\s\S]*\}/);
       if (m) return JSON.parse(m[0]) as EditRecommendation;
@@ -63,7 +63,7 @@ Provide 4-8 edit points and 4-6 cleanup suggestions.`,
   }
 
   async generateCleanupPlan(recordingNotes: string, fillerSummary: string, onChunk?: (c: string) => void): Promise<string> {
-    return aiProviderService.prompt([{
+    return aiProducerService.runTask('post-production', [{
       role: 'user',
       content: `Create a concise audio cleanup plan for this podcast recording.
 Recording notes: ${recordingNotes || 'standard recording'}
@@ -73,7 +73,7 @@ Provide 6-8 specific, prioritized cleanup steps.`,
   }
 
   async generateNoiseAnalysis(recordingNotes: string, onChunk?: (c: string) => void): Promise<string> {
-    return aiProviderService.prompt([{
+    return aiProducerService.runTask('post-production', [{
       role: 'user',
       content: `Analyze and provide noise reduction recommendations for a podcast recording.
 Notes: ${recordingNotes || 'no specific noise issues noted'}
