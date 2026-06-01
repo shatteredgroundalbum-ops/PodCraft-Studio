@@ -1,5 +1,5 @@
 const DB_NAME = 'podcraft-central';
-const DB_VERSION = 1;
+const DB_VERSION = 2;   // bumped: adds mediaProviderConfigs + generatedAssets stores
 
 export interface DBSchema {
   users: { email: string; passwordHash: string; name: string; timezone: string; createdAt: string };
@@ -8,6 +8,8 @@ export interface DBSchema {
   tasks: object;
   mediaAssets: object;
   templates: object;
+  mediaProviderConfigs: object;   // API keys + provider settings (local device only)
+  generatedAssets: object;        // AI-generated media assets + rights metadata
 }
 
 let dbInstance: IDBDatabase | null = null;
@@ -18,6 +20,8 @@ export function openDB(): Promise<IDBDatabase> {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = (e) => {
       const db = (e.target as IDBOpenDBRequest).result;
+
+      // Version 1 stores (idempotent — safe whether fresh install or upgrade)
       if (!db.objectStoreNames.contains('users')) {
         db.createObjectStore('users', { keyPath: 'email' });
       }
@@ -35,6 +39,17 @@ export function openDB(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains('templates')) {
         db.createObjectStore('templates', { keyPath: 'id' });
+      }
+
+      // Version 2 stores — Media Services Hub
+      if (!db.objectStoreNames.contains('mediaProviderConfigs')) {
+        db.createObjectStore('mediaProviderConfigs', { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains('generatedAssets')) {
+        const assetStore = db.createObjectStore('generatedAssets', { keyPath: 'id' });
+        assetStore.createIndex('byEpisode', 'episodeId', { unique: false });
+        assetStore.createIndex('byProject', 'projectId', { unique: false });
+        assetStore.createIndex('byType', 'assetType', { unique: false });
       }
     };
     request.onsuccess = (e) => {

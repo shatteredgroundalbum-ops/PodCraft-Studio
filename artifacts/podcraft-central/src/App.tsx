@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './store/AuthStore';
 import { MediaStoreProvider } from './store/MediaStore';
 import { AIConfigProvider, useAIConfig } from './store/AIConfigStore';
+import { MediaProviderProvider } from './store/MediaProviderStore';
 import { AISetupWizard } from './components/AISetupWizard';
 
 import { Splash } from './pages/Splash';
@@ -100,8 +101,10 @@ export default function App() {
       <AuthProvider>
         <MediaStoreProvider>
           <AIConfigProvider>
-            <AppRoutes />
-            <AIWizardController />
+            <MediaProviderProvider>
+              <AppRoutes />
+              <AIWizardController />
+            </MediaProviderProvider>
           </AIConfigProvider>
         </MediaStoreProvider>
       </AuthProvider>

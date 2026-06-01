@@ -13,6 +13,7 @@ import { phi3MiniAdapter, PHI3_SIZE_MB } from '../services/ai/phi3MiniAdapter';
 import { aiProviderService } from '../services/ai/aiProviderService';
 import { BYOK_PROVIDER_NAMES } from '../services/ai/types';
 import type { AIProviderMode } from '../services/ai/types';
+import { MediaProviderSettings } from '../components/MediaProviderSettings';
 
 const NAV = [
   { label: 'Profile', href: '/settings/profile', icon: UserIcon },
@@ -21,6 +22,7 @@ const NAV = [
   { label: 'Appearance', href: '/settings/appearance', icon: PaletteIcon },
   { label: 'Audio', href: '/settings/audio', icon: MicIcon },
   { label: 'AI Producer', href: '/settings/ai', icon: SparklesIcon },
+  { label: 'Media Providers', href: '/settings/media-providers', icon: MicIcon },
   { label: 'Privacy & Security', href: '/settings/privacy', icon: KeyIcon },
   { label: 'Billing', href: '/settings/billing', icon: CreditCardIcon },
   { label: 'Integrations', href: '/settings/integrations', icon: PlugIcon },
@@ -333,6 +335,7 @@ export function Settings() {
             <Route path="billing" element={<SimpleSettingsPage title="Billing" description="Manage your subscription and billing information." />} />
             <Route path="integrations" element={<SimpleSettingsPage title="Integrations" description="Connect PodCraft Central with other tools and platforms." />} />
             <Route path="ai" element={<AISettingsPage />} />
+            <Route path="media-providers" element={<MediaProviderSettings />} />
             <Route path="*" element={<Navigate to="profile" replace />} />
           </Routes>
         </div>
