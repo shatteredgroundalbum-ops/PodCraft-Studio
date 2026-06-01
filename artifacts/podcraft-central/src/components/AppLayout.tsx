@@ -2,11 +2,13 @@ import React, { useEffect, useState, useRef, Fragment } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { PodCraftLogo } from './PodCraftLogo';
 import { useAuth } from '../store/AuthStore';
+import { usePWAInstall } from '../hooks/usePWAInstall';
 import {
   HomeIcon, FolderIcon, CalendarIcon, CheckCircleIcon, LayoutTemplateIcon,
   ImageIcon, BarChartIcon, UsersIcon, SettingsIcon, PlusIcon, HelpCircleIcon,
   BellIcon, ChevronDownIcon, MicIcon, LogOutIcon, UserIcon, ShieldIcon,
   PaletteIcon, BookOpenIcon, ScaleIcon, LifeBuoyIcon, InfoIcon, SparklesIcon,
+  DownloadIcon,
 } from 'lucide-react';
 
 interface AppLayoutProps {
@@ -20,6 +22,7 @@ export function AppLayout({ children, title, breadcrumbs, rightHeader }: AppLayo
   const location = useLocation();
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
+  const { canInstall, isInstalling, install } = usePWAInstall();
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
@@ -84,6 +87,17 @@ export function AppLayout({ children, title, breadcrumbs, rightHeader }: AppLayo
             );
           })}
         </div>
+        {canInstall && (
+          <div className="px-4 pb-2">
+            <button
+              onClick={install}
+              disabled={isInstalling}
+              className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium bg-violet-50 text-violet-700 hover:bg-violet-100 transition-colors border border-violet-200">
+              <DownloadIcon className="w-4 h-4 text-violet-500 shrink-0" />
+              {isInstalling ? 'Installing…' : 'Install App'}
+            </button>
+          </div>
+        )}
         <div className="p-4 border-t border-gray-100">
           <Link to="/settings" className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${location.pathname.startsWith('/settings') ? 'bg-violet-50 text-violet-700' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'}`}>
             <SettingsIcon className={`w-5 h-5 ${location.pathname.startsWith('/settings') ? 'text-violet-600' : 'text-gray-400'}`} />
