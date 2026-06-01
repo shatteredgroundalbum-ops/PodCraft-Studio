@@ -77,7 +77,7 @@ export default defineConfig({
           "The complete podcast production workspace — plan, record, edit, mix, master, and publish.",
         theme_color: "#7c3aed",
         background_color: "#1e1b4b",
-        display: "standalone",
+        display: "fullscreen",
         orientation: "any",
         scope: "/",
         start_url: "/",

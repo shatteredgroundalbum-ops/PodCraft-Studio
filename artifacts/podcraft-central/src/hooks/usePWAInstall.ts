@@ -19,9 +19,10 @@ export function usePWAInstall(): PWAInstallState {
   const [isInstalling, setIsInstalling] = useState(false);
 
   useEffect(() => {
-    // Already running as installed PWA
+    // Already running as installed PWA (standalone or fullscreen display mode)
     const standalone =
       window.matchMedia('(display-mode: standalone)').matches ||
+      window.matchMedia('(display-mode: fullscreen)').matches ||
       ('standalone' in window.navigator && (window.navigator as { standalone?: boolean }).standalone === true);
     if (standalone) {
       setIsInstalled(true);
