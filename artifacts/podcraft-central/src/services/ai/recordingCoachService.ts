@@ -5,6 +5,11 @@ import type {
   ReadinessMetric, AIMessage,
 } from './types';
 import { PROCESSING_RANGES, RECORDING_STANDARDS } from './types';
+import {
+  matchMicProfile, matchInterfaceProfile, formatProfileForPrompt,
+  CALIBRATION_STEPS,
+  type MicProfile, type InterfaceProfile, type CalibrationSession,
+} from './deviceProfiles';
 import { aiProviderService } from './aiProviderService';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -381,6 +386,97 @@ JSON:
     const recommendations = Object.values(items).filter(i => i.recommendation).map(i => i.recommendation!);
 
     return { ...items, overallStatus, issues, recommendations };
+  }
+
+  // ── Device Profile + Calibration ─────────────────────────────────────────
+
+  /** Returns the 6-step pre-recording calibration checklist. */
+  getCalibrationSteps(): readonly string[] {
+    return CALIBRATION_STEPS;
+  }
+
+  /** Look up mic and interface profiles from descriptions, return starting-point settings. */
+  resolveDeviceProfiles(micDescription?: string, interfaceDescription?: string): {
+    mic: MicProfile | undefined;
+    interface: InterfaceProfile | undefined;
+    profilePrompt: string;
+  } {
+    const mic = micDescription ? matchMicProfile(micDescription) : undefined;
+    const iface = interfaceDescription ? matchInterfaceProfile(interfaceDescription) : undefined;
+    return {
+      mic,
+      interface: iface,
+      profilePrompt: formatProfileForPrompt(mic, iface),
+    };
+  }
+
+  /**
+   * Run a full AI-driven calibration session.
+   * Loads the device profile as a starting point, then incorporates measured
+   * values to produce session-specific recommended settings.
+   * Calibrated values always override profile defaults.
+   */
+  async runCalibrationSession(input: {
+    micDescription?: string;
+    interfaceDescription?: string;
+    measuredNoiseFloorDB?: number;
+    measuredPeakDB?: number;
+    measuredSpeechLevelDB?: number;
+    hasSibilanceIssues?: boolean;
+    hasPlosiveIssues?: boolean;
+    hasRoomReflections?: boolean;
+    roomDescription?: string;
+    onChunk?: (c: string) => void;
+  }): Promise<CalibrationSession> {
+    const { mic, interface: iface, profilePrompt } = this.resolveDeviceProfiles(
+      input.micDescription, input.interfaceDescription,
+    );
+
+    const measuredData = [
+      input.measuredNoiseFloorDB !== undefined ? `Noise floor: ${input.measuredNoiseFloorDB} dBFS` : null,
+      input.measuredPeakDB !== undefined ? `Peak level: ${input.measuredPeakDB} dBFS` : null,
+      input.measuredSpeechLevelDB !== undefined ? `Speech level: ${input.measuredSpeechLevelDB} dBFS` : null,
+      input.hasSibilanceIssues ? 'Sibilance issues detected' : null,
+      input.hasPlosiveIssues ? 'Plosive issues detected' : null,
+      input.hasRoomReflections ? 'Room reflections present' : null,
+    ].filter(Boolean).join('\n');
+
+    const messages: AIMessage[] = [{
+      role: 'system',
+      content: `You are a professional podcast audio engineer. 
+${profilePrompt}
+
+RULE: These profiles are starting points only. If measured values differ from the profile gold zones, 
+the calibration pass overrides the profile. Never assume the default profile is correct.`,
+    }, {
+      role: 'user',
+      content: `Generate session-specific recording settings based on this calibration data.
+
+Room: ${input.roomDescription ?? 'not described'}
+${measuredData ? `Measured values:\n${measuredData}` : 'No measurements yet — provide starting-point recommendations from the profile.'}
+
+For each relevant parameter, state:
+1. Profile starting point
+2. Calibrated value (based on measurements, or "use profile default" if not measured)
+3. Why the calibration overrides or confirms the profile
+
+Then provide a concise session setup checklist.`,
+    }];
+
+    const result = await aiProviderService.prompt(messages, { onChunk: input.onChunk });
+
+    return {
+      micId: mic?.id,
+      interfaceId: iface?.id,
+      measuredNoiseFloorDB: input.measuredNoiseFloorDB,
+      measuredPeakDB: input.measuredPeakDB,
+      measuredSpeechLevelDB: input.measuredSpeechLevelDB,
+      hasSibilanceIssues: input.hasSibilanceIssues,
+      hasPlosiveIssues: input.hasPlosiveIssues,
+      hasRoomReflections: input.hasRoomReflections,
+      sessionSettings: { calibrationNotes: result },
+      calibratedAt: new Date().toISOString(),
+    };
   }
 
   async getRecordingTip(topic: string, onChunk?: (c: string) => void): Promise<string> {
