@@ -10,6 +10,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.3.4",
     "@hookform/resolvers": "^3.10.0",
     "@radix-ui/react-accordion": "^1.2.4",
     "@radix-ui/react-alert-dialog": "^1.1.7",
@@ -76,6 +77,8 @@
     "zod": "catalog:"
   },
   "dependencies": {
+    "@capacitor/android": "^8.3.4",
+    "@capacitor/core": "^8.3.4",
     "@huggingface/transformers": "^4.2.0",
     "@opendaw/lib-dsp": "^0.0.84",
     "@opendaw/lib-runtime": "^0.0.79",
