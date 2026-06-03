@@ -230,3 +230,24 @@ export function formatBytes(bytes: number): string {
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 ** 2)).toFixed(0)} MB`;
   return `${(bytes / 1024).toFixed(0)} KB`;
 }
+
+/**
+ * Run a minimal test inference to verify the model is usable.
+ * Times out after 10 s. Does NOT block Ready — if timed out, model still
+ * loads; the test inconclusive path should be handled by the caller.
+ */
+export async function testLocalModelInference(
+  pipe: LoadedPipeline,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const result = await Promise.race([
+      pipe([{ role: 'user', content: 'Hi' }], { max_new_tokens: 2, do_sample: false }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Test inference timed out (10 s)')), 10000),
+      ),
+    ]);
+    return { ok: !!result };
+  } catch (e: any) {
+    return { ok: false, error: e?.message ?? 'Test inference failed' };
+  }
+}

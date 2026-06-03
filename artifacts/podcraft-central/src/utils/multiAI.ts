@@ -31,6 +31,7 @@ export interface ProviderDef {
   unsupportedNote?: string;
   docsUrl: string;
   keyHint: string;
+  freeTier?: { label: string; rateLimit?: string };
 }
 
 export const PROVIDER_DEFS: ProviderDef[] = [
@@ -94,6 +95,7 @@ export const PROVIDER_DEFS: ProviderDef[] = [
     browserCompatible: true,
     docsUrl: 'https://aistudio.google.com/app/apikey',
     keyHint: 'aistudio.google.com',
+    freeTier: { label: 'Free tier via Google AI Studio', rateLimit: '15 requests/min · up to 1,500 requests/day on the free Gemini API' },
   },
   {
     id: 'bedrock',
@@ -157,6 +159,7 @@ export const PROVIDER_DEFS: ProviderDef[] = [
     browserCompatible: true,
     docsUrl: 'https://console.groq.com/',
     keyHint: 'console.groq.com → API Keys',
+    freeTier: { label: 'Free tier available', rateLimit: 'Rate limited — up to 6,000 tokens/min on the free plan' },
   },
   {
     id: 'fireworks',
@@ -202,6 +205,7 @@ export const PROVIDER_DEFS: ProviderDef[] = [
     browserCompatible: true,
     docsUrl: 'https://openrouter.ai/keys',
     keyHint: 'openrouter.ai/keys',
+    freeTier: { label: 'Free models available via OpenRouter', rateLimit: 'Varies by model — free models may be rate limited or unavailable at peak hours' },
   },
   {
     id: 'cohere',

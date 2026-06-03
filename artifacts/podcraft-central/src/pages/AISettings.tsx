@@ -4,7 +4,7 @@ import {
   Cpu, Cloud, Sparkles, List, ChevronDown, ChevronRight,
   CheckCircle2, AlertTriangle, AlertCircle, Download, Trash2,
   Loader2, Eye, EyeOff, HardDrive, Zap, RefreshCw,
-  ExternalLink, Check, Info, WifiOff, Wifi, Monitor, ArrowLeft,
+  ExternalLink, Check, Info, WifiOff, Wifi, Monitor, ArrowLeft, Smartphone,
 } from 'lucide-react';
 import { AppLayout } from '../components/AppLayout';
 import {
@@ -15,8 +15,26 @@ import { PROVIDER_DEFS, ProviderDef, ProviderStatus, fetchOllamaModelList } from
 import {
   LOCAL_MODELS, LocalModelConfig,
   checkWebGPU, checkStorage, getInstalledModelIds,
-  loadLocalModel, deleteLocalModel, formatBytes,
+  loadLocalModel, deleteLocalModel, formatBytes, testLocalModelInference,
 } from '../utils/localAI';
+
+/* ── Device detection ──────────────────────────────────────────── */
+function useIsMobile(): boolean {
+  const detect = () => {
+    if (typeof window === 'undefined') return false;
+    return (
+      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+      (window.innerWidth < 1024 && 'ontouchstart' in window)
+    );
+  };
+  const [isMobile, setIsMobile] = useState(detect);
+  useEffect(() => {
+    const onResize = () => setIsMobile(detect());
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  return isMobile;
+}
 
 /* ── Section types ─────────────────────────────────────────────── */
 type Section = 'llm' | 'cloud' | 'pipeline' | 'assignments';
@@ -106,6 +124,7 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 function LLMSection() {
   const { loadedLocalModelIds, registerLocalPipeline, unregisterLocalPipeline, assignModule } = useAIModel();
+  const isMobile = useIsMobile();
 
   const [hasWebGPU, setHasWebGPU]       = useState<boolean | null>(null);
   const [deviceMemory, setDeviceMemory] = useState<number | null>(null);
@@ -176,6 +195,16 @@ function LLMSection() {
 
   return (
     <div className="space-y-5">
+      {isMobile && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
+          <Smartphone className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5"/>
+          <div>
+            <div className="text-sm font-bold text-amber-800 mb-1">Desktop / Laptop Only</div>
+            <p className="text-xs text-amber-700">Local AI models require significant CPU, RAM, and storage — they cannot run on phones or tablets. Use the Cloud tab to connect a free or paid cloud provider instead.</p>
+          </div>
+        </div>
+      )}
+
       {/* Device capability card */}
       <div className="bg-white rounded-xl border border-gray-200 p-5">
         <h3 className="text-sm font-bold text-gray-900 mb-3 flex items-center gap-2">
@@ -262,7 +291,7 @@ function LLMSection() {
                     {/* Actions */}
                     <div className="flex items-center gap-2 flex-shrink-0">
                       {/* Load / Download */}
-                      {!incompatible && !isLoading && ms.status !== 'ready' && (
+                      {!incompatible && !isLoading && ms.status !== 'ready' && !isMobile && (
                         <button onClick={() => handleLoad(model)}
                           disabled={storageTight}
                           className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed">
@@ -329,6 +358,8 @@ function CapCell({ label, value, ok, na }: { label: string; value: string; ok: b
 /* ══════════════════════════════════════════════════════════════════
    Cloud Section — provider connections
 ══════════════════════════════════════════════════════════════════ */
+const FREE_CLOUD_IDS = ['groq', 'google', 'openrouter'];
+
 function CloudSection() {
   const { providerStates, connectProvider, disconnectProvider, assignModule } = useAIModel();
   const [expanded,     setExpanded]     = useState<Record<string, boolean>>({});
@@ -336,13 +367,13 @@ function CloudSection() {
   const [extraInput,   setExtraInput]   = useState<Record<string, Record<string, string>>>({});
   const [showKey,      setShowKey]      = useState<Record<string, boolean>>({});
   const [ollamaModels, setOllamaModels] = useState<string[]>([]);
-  const [assignOpen,   setAssignOpen]   = useState<string | null>(null); // `${providerId}::${modelId}`
+  const [assignOpen,   setAssignOpen]   = useState<string | null>(null);
 
   const handleConnect = async (providerId: string, key: string, extra?: Record<string, string>) => {
     await connectProvider(providerId, key, extra);
   };
 
-  const toggleExpand = async (def: typeof PROVIDER_DEFS[0]) => {
+  const toggleExpand = async (def: ProviderDef) => {
     const next = !expanded[def.id];
     setExpanded(p => ({ ...p, [def.id]: next }));
     if (next && def.id === 'ollama' && ollamaModels.length === 0) {
@@ -356,169 +387,191 @@ function CloudSection() {
     setAssignOpen(null);
   };
 
-  return (
-    <div className="space-y-2">
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="px-5 py-3.5 border-b border-gray-100 bg-gray-50">
-          <p className="text-xs text-gray-500">
-            Connect cloud AI providers. API keys are stored locally on your device only. Each connection is validated with a real API call before status is marked Connected.
-          </p>
+  const renderProviderRow = (def: ProviderDef) => {
+    const ps = providerStates[def.id];
+    const status: ProviderStatus = ps?.status ?? 'not-connected';
+    const isConnected = status === 'connected';
+    const isValidating = status === 'validating';
+    const isOpen = !!expanded[def.id];
+    const savedKey = ps?.apiKey ?? '';
+    const currentKey = keyInput[def.id] ?? savedKey;
+    const currentExtra = extraInput[def.id] ?? {};
+
+    return (
+      <div key={def.id} className="border-b border-gray-100 last:border-b-0">
+        <div className="flex items-center gap-3 px-5 py-3.5 hover:bg-gray-50 cursor-pointer" onClick={() => toggleExpand(def)}>
+          <button className="text-gray-400 flex-shrink-0" aria-label="toggle">
+            {isOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+          </button>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm font-semibold text-gray-900">{def.name}</span>
+              {!def.browserCompatible && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold bg-gray-100 text-gray-500">Proxy Required</span>
+              )}
+              {def.freeTier && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold bg-emerald-100 text-emerald-700">Free tier</span>
+              )}
+              <span className={`text-xs ${STATUS_COLOR[status]}`}>{STATUS_LABEL[status]}</span>
+            </div>
+            <p className="text-[11px] text-gray-400 mt-0.5 truncate">{def.recommendedFor}</p>
+          </div>
+          {isConnected && (
+            <button onClick={e => { e.stopPropagation(); disconnectProvider(def.id); }}
+              className="px-2.5 py-1 text-xs text-red-600 border border-red-200 rounded-lg hover:bg-red-50 flex-shrink-0">
+              Disconnect
+            </button>
+          )}
         </div>
 
-        {PROVIDER_DEFS.map(def => {
-          const ps = providerStates[def.id];
-          const status: ProviderStatus = ps?.status ?? 'not-connected';
-          const isConnected = status === 'connected';
-          const isValidating = status === 'validating';
-          const isOpen = !!expanded[def.id];
-          const savedKey = ps?.apiKey ?? '';
-          const currentKey = keyInput[def.id] ?? savedKey;
-          const currentExtra = extraInput[def.id] ?? {};
-
-          return (
-            <div key={def.id} className="border-b border-gray-100 last:border-b-0">
-              {/* Provider row */}
-              <div className="flex items-center gap-3 px-5 py-3.5 hover:bg-gray-50 cursor-pointer" onClick={() => !def.id.includes('unsupported') && toggleExpand(def)}>
-                <button className="text-gray-400 flex-shrink-0" aria-label="toggle">
-                  {isOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                </button>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-sm font-semibold text-gray-900">{def.name}</span>
-                    {!def.browserCompatible && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold bg-gray-100 text-gray-500">Proxy Required</span>
-                    )}
-                    <span className={`text-xs ${STATUS_COLOR[status]}`}>{STATUS_LABEL[status]}</span>
-                  </div>
-                  <p className="text-[11px] text-gray-400 mt-0.5 truncate">{def.recommendedFor}</p>
+        {isOpen && (
+          <div className="bg-gray-50 border-t border-gray-100 px-5 py-4 space-y-4">
+            {!def.browserCompatible ? (
+              <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-700">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                <div>
+                  <div className="font-semibold mb-0.5">{def.unsupportedNote ?? 'Cannot connect from browser'}</div>
+                  <div>This provider requires a server-side proxy. A browser client cannot authenticate directly.</div>
                 </div>
-                {isConnected && (
-                  <button onClick={e => { e.stopPropagation(); disconnectProvider(def.id); }}
-                    className="px-2.5 py-1 text-xs text-red-600 border border-red-200 rounded-lg hover:bg-red-50 flex-shrink-0">
-                    Disconnect
+              </div>
+            ) : (
+              <>
+                {def.freeTier && (
+                  <div className="flex items-start gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-700">
+                    <Info className="w-4 h-4 shrink-0 mt-0.5" />
+                    <div>
+                      <div className="font-semibold mb-0.5">{def.freeTier.label}</div>
+                      {def.freeTier.rateLimit && <div className="text-emerald-600 mt-0.5">{def.freeTier.rateLimit}</div>}
+                      <div className="text-emerald-500 mt-0.5">Free does not mean unlimited — rate limits apply.</div>
+                    </div>
+                  </div>
+                )}
+                {def.needsKey && (
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1.5">API Key</label>
+                    <div className="flex gap-2">
+                      <div className="relative flex-1">
+                        <input
+                          type={showKey[def.id] ? 'text' : 'password'}
+                          value={currentKey}
+                          onChange={e => setKeyInput(p => ({ ...p, [def.id]: e.target.value }))}
+                          placeholder={def.keyPlaceholder}
+                          className="w-full pr-9 pl-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:outline-none focus:border-violet-400 bg-white"
+                        />
+                        <button type="button" onClick={() => setShowKey(p => ({ ...p, [def.id]: !p[def.id] }))}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                          {showKey[def.id] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                      <a href={def.docsUrl} target="_blank" rel="noreferrer"
+                        className="flex items-center gap-1 px-2.5 py-2 text-xs text-gray-500 border border-gray-200 rounded-lg hover:bg-white flex-shrink-0">
+                        <ExternalLink className="w-3 h-3" /> Get key
+                      </a>
+                    </div>
+                    <p className="text-[10px] text-gray-400 mt-1">{def.keyHint}</p>
+                  </div>
+                )}
+                {def.extraFields?.map(f => (
+                  <div key={f.key}>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1.5">{f.label}</label>
+                    <input
+                      type="text"
+                      value={currentExtra[f.key] ?? f.defaultValue}
+                      onChange={e => setExtraInput(p => ({ ...p, [def.id]: { ...p[def.id], [f.key]: e.target.value } }))}
+                      placeholder={f.placeholder}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-violet-400 bg-white"
+                    />
+                  </div>
+                ))}
+                {!isConnected && (
+                  <button
+                    onClick={() => handleConnect(def.id, currentKey, Object.keys(currentExtra).length ? currentExtra : undefined)}
+                    disabled={isValidating || (def.needsKey && !currentKey.trim())}
+                    className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed">
+                    {isValidating ? <><Loader2 className="w-4 h-4 animate-spin" /> Validating…</> : <><Wifi className="w-4 h-4" /> Connect</>}
                   </button>
                 )}
-              </div>
-
-              {/* Expanded: key input + models */}
-              {isOpen && (
-                <div className="bg-gray-50 border-t border-gray-100 px-5 py-4 space-y-4">
-                  {!def.browserCompatible ? (
-                    <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-700">
-                      <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                      <div>
-                        <div className="font-semibold mb-0.5">{def.unsupportedNote ?? 'Cannot connect from browser'}</div>
-                        <div>This provider requires a server-side proxy. A browser client cannot authenticate directly.</div>
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                      {/* API key field */}
-                      {def.needsKey && (
-                        <div>
-                          <label className="block text-xs font-semibold text-gray-600 mb-1.5">API Key</label>
-                          <div className="flex gap-2">
-                            <div className="relative flex-1">
-                              <input
-                                type={showKey[def.id] ? 'text' : 'password'}
-                                value={currentKey}
-                                onChange={e => setKeyInput(p => ({ ...p, [def.id]: e.target.value }))}
-                                placeholder={def.keyPlaceholder}
-                                className="w-full pr-9 pl-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:outline-none focus:border-violet-400 bg-white"
-                              />
-                              <button type="button" onClick={() => setShowKey(p => ({ ...p, [def.id]: !p[def.id] }))}
-                                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                                {showKey[def.id] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                              </button>
+                {(status === 'invalid-key' || status === 'connection-failed') && (
+                  <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-600">
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                    {status === 'invalid-key' ? 'API key is invalid or expired. Please check and try again.' : 'Could not reach this provider. Check your network and try again.'}
+                  </div>
+                )}
+                {isConnected && (
+                  <div>
+                    <div className="text-xs font-semibold text-gray-600 mb-2">Available Models</div>
+                    <div className="space-y-1">
+                      {(def.id === 'ollama' ? ollamaModels.map(m => ({ id: m, name: m, recommendedModules: [] as string[] })) : def.models).map(model => {
+                        const mkey = `${def.id}::${model.id}`;
+                        return (
+                          <div key={model.id} className="flex items-center justify-between gap-2 px-3 py-2 bg-white border border-gray-200 rounded-lg">
+                            <div>
+                              <span className="text-sm font-medium text-gray-900">{model.name}</span>
+                              {model.recommendedModules?.length > 0 && (
+                                <span className="text-[10px] text-gray-400 ml-2">{model.recommendedModules.slice(0, 3).join(', ')}</span>
+                              )}
                             </div>
-                            <a href={def.docsUrl} target="_blank" rel="noreferrer"
-                              className="flex items-center gap-1 px-2.5 py-2 text-xs text-gray-500 border border-gray-200 rounded-lg hover:bg-white">
-                              <ExternalLink className="w-3 h-3" /> Get key
-                            </a>
-                          </div>
-                          <p className="text-[10px] text-gray-400 mt-1">{def.keyHint}</p>
-                        </div>
-                      )}
-
-                      {/* Extra fields (e.g. Ollama URL) */}
-                      {def.extraFields?.map(f => (
-                        <div key={f.key}>
-                          <label className="block text-xs font-semibold text-gray-600 mb-1.5">{f.label}</label>
-                          <input
-                            type="text"
-                            value={currentExtra[f.key] ?? f.defaultValue}
-                            onChange={e => setExtraInput(p => ({ ...p, [def.id]: { ...p[def.id], [f.key]: e.target.value } }))}
-                            placeholder={f.placeholder}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-violet-400 bg-white"
-                          />
-                        </div>
-                      ))}
-
-                      {/* Connect button */}
-                      {!isConnected && (
-                        <button
-                          onClick={() => handleConnect(def.id, currentKey, Object.keys(currentExtra).length ? currentExtra : undefined)}
-                          disabled={isValidating || (def.needsKey && !currentKey.trim())}
-                          className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed">
-                          {isValidating ? <><Loader2 className="w-4 h-4 animate-spin" /> Validating…</> : <><Wifi className="w-4 h-4" /> Connect</>}
-                        </button>
-                      )}
-
-                      {/* Error message */}
-                      {(status === 'invalid-key' || status === 'connection-failed') && (
-                        <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-600">
-                          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                          {status === 'invalid-key' ? 'API key is invalid or expired. Please check and try again.' : 'Could not reach this provider. Check your network and try again.'}
-                        </div>
-                      )}
-
-                      {/* Connected: model list */}
-                      {isConnected && (
-                        <div>
-                          <div className="text-xs font-semibold text-gray-600 mb-2">Available Models</div>
-                          <div className="space-y-1">
-                            {(def.id === 'ollama' ? ollamaModels.map(m => ({ id: m, name: m, recommendedModules: [] })) : def.models).map(model => {
-                              const key = `${def.id}::${model.id}`;
-                              return (
-                                <div key={model.id} className="flex items-center justify-between gap-2 px-3 py-2 bg-white border border-gray-200 rounded-lg">
-                                  <div>
-                                    <span className="text-sm font-medium text-gray-900">{model.name}</span>
-                                    {model.recommendedModules?.length > 0 && (
-                                      <span className="text-[10px] text-gray-400 ml-2">{model.recommendedModules.slice(0, 3).join(', ')}</span>
-                                    )}
-                                  </div>
-                                  <div className="relative">
-                                    <button onClick={() => setAssignOpen(assignOpen === key ? null : key)}
-                                      className="flex items-center gap-1 px-2.5 py-1 text-xs text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">
-                                      Assign <ChevronDown className="w-3 h-3" />
+                            <div className="relative">
+                              <button onClick={() => setAssignOpen(assignOpen === mkey ? null : mkey)}
+                                className="flex items-center gap-1 px-2.5 py-1 text-xs text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">
+                                Assign <ChevronDown className="w-3 h-3" />
+                              </button>
+                              {assignOpen === mkey && (
+                                <div className="absolute right-0 top-full mt-1 w-52 bg-white border border-gray-200 rounded-xl shadow-lg z-10 py-1 max-h-60 overflow-y-auto">
+                                  {AI_MODULES.map(mod => (
+                                    <button key={mod.id} onClick={() => handleAssignModel(def.id, def.name, model.id, model.name, mod.id)}
+                                      className="w-full text-left px-3 py-2 text-xs hover:bg-violet-50 text-gray-700">
+                                      {mod.label}
                                     </button>
-                                    {assignOpen === key && (
-                                      <div className="absolute right-0 top-full mt-1 w-52 bg-white border border-gray-200 rounded-xl shadow-lg z-10 py-1 max-h-60 overflow-y-auto">
-                                        {AI_MODULES.map(mod => (
-                                          <button key={mod.id} onClick={() => handleAssignModel(def.id, def.name, model.id, model.name, mod.id)}
-                                            className="w-full text-left px-3 py-2 text-xs hover:bg-violet-50 text-gray-700">
-                                            {mod.label}
-                                          </button>
-                                        ))}
-                                      </div>
-                                    )}
-                                  </div>
+                                  ))}
                                 </div>
-                              );
-                            })}
-                            {def.id === 'ollama' && ollamaModels.length === 0 && (
-                              <p className="text-xs text-gray-400 py-2">No Ollama models found at the configured URL.</p>
-                            )}
+                              )}
+                            </div>
                           </div>
-                        </div>
+                        );
+                      })}
+                      {def.id === 'ollama' && ollamaModels.length === 0 && (
+                        <p className="text-xs text-gray-400 py-2">No Ollama models found at the configured URL.</p>
                       )}
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const freeDefs = PROVIDER_DEFS.filter(d => FREE_CLOUD_IDS.includes(d.id));
+  const otherDefs = PROVIDER_DEFS.filter(d => !FREE_CLOUD_IDS.includes(d.id));
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-white rounded-xl border border-gray-200 px-5 py-3.5">
+        <p className="text-xs text-gray-500">
+          Connect cloud AI providers. API keys are stored locally on your device only. Each connection is validated with a real API call before status is marked Connected.
+        </p>
+      </div>
+
+      {/* Free / Low-Cost Cloud AI */}
+      <div className="bg-white rounded-xl border border-emerald-200 overflow-hidden">
+        <div className="px-5 py-3 border-b border-emerald-100 bg-emerald-50">
+          <div className="text-xs font-bold text-emerald-700 uppercase tracking-wide">Free / Low-Cost Cloud AI</div>
+          <p className="text-[10px] text-emerald-600 mt-0.5">
+            These providers offer free tiers or free-tier models. API key required · Rate limits apply · Free does not mean unlimited.
+          </p>
+        </div>
+        {freeDefs.map(renderProviderRow)}
+      </div>
+
+      {/* All other providers */}
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="px-5 py-2.5 border-b border-gray-100 bg-gray-50">
+          <span className="text-xs font-bold text-gray-500 uppercase tracking-wide">All Cloud Providers</span>
+        </div>
+        {otherDefs.map(renderProviderRow)}
       </div>
     </div>
   );
@@ -565,7 +618,7 @@ interface ModulePlan {
 
 interface LocalSetupOp {
   id: string; model: LocalModelConfig; kind: 'download' | 'load';
-  status: 'pending' | 'checking-storage' | 'downloading' | 'loading' | 'done' | 'failed';
+  status: 'pending' | 'checking-storage' | 'downloading' | 'loading' | 'testing' | 'done' | 'failed';
   progress: number; error?: string;
 }
 
@@ -631,6 +684,7 @@ function buildModulePlan(
   loadedIds: string[],
   installedIds: string[],
   hasWebGPU: boolean | null,
+  isMobile: boolean,
   storage: { available: number } | null,
 ): { plans: ModulePlan[]; localOps: LocalSetupOp[]; cloudOps: CloudSetupOp[] } {
   const plans: ModulePlan[] = [];
@@ -655,7 +709,7 @@ function buildModulePlan(
   for (const mod of AI_MODULES) {
     const isHigh = HIGH_INTELLIGENCE.has(mod.id);
     const base = { moduleId: mod.id, moduleName: mod.label, moduleDesc: mod.description };
-    const useLocal = mode === 'local' || (mode === 'hybrid' && !isHigh);
+    const useLocal = !isMobile && (mode === 'local' || (mode === 'hybrid' && !isHigh));
     let plan: ModulePlan;
 
     if (useLocal) {
@@ -727,9 +781,10 @@ function LocalOpRow({ op }: { op: LocalSetupOp }) {
   const LABELS: Record<LocalSetupOp['status'], string> = {
     pending: 'Waiting…', 'checking-storage': 'Checking storage…',
     downloading: 'Downloading…', loading: 'Loading into runtime…',
-    done: 'Ready', failed: 'Failed',
+    testing: 'Testing inference…',
+    done: 'Ready ✓', failed: 'Failed',
   };
-  const active = op.status === 'downloading' || op.status === 'loading';
+  const active = op.status === 'downloading' || op.status === 'loading' || op.status === 'testing';
   return (
     <div className="flex flex-col gap-1.5 px-5 py-3.5 border-b border-gray-50 last:border-0">
       <div className="flex items-center justify-between gap-2">
