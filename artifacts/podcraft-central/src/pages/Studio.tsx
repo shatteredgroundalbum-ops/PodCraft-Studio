@@ -9,6 +9,7 @@ import { StudioScriptPanel } from '../components/studio/StudioScriptPanel';
 import { StudioAIPanel } from '../components/studio/StudioAIPanel';
 import { StudioMixer } from '../components/studio/StudioMixer';
 import { AudioSetupModal } from '../components/studio/AudioSetupModal';
+import { ProjectSetupWizard } from '../components/studio/ProjectSetupWizard';
 
 /* ── Session storage key ──────────────────────────────────────── */
 const LAST_PROFILE_KEY = 'podcraft_last_room_profile_v2';
@@ -72,6 +73,7 @@ function StudioPage() {
 
   /* Session prompt state */
   const [sessionChoice, setSessionChoice] = useState<SessionChoice>('pending');
+  const [showProjectSetup, setShowProjectSetup] = useState(false);
   const hasLastSession = useMemo(() => hasStoredSession(), []);
 
   const handleNewSession = useCallback(() => {
@@ -190,7 +192,17 @@ function StudioPage() {
       )}
 
       {/* Audio setup wizard — shown after "New Session" if setup not yet done */}
-      {sessionChoice !== 'pending' && !audioSetupDone && <AudioSetupModal />}
+      {sessionChoice !== 'pending' && !audioSetupDone && !showProjectSetup && (
+        <AudioSetupModal onProceedToProject={() => setShowProjectSetup(true)} />
+      )}
+
+      {/* Project setup wizard — shown after audio setup completes */}
+      {showProjectSetup && !audioSetupDone && (
+        <ProjectSetupWizard
+          onDone={() => { setAudioSetupDone(true); setShowProjectSetup(false); }}
+          onSkip={() => { setAudioSetupDone(true); setShowProjectSetup(false); }}
+        />
+      )}
     </div>
   );
 }

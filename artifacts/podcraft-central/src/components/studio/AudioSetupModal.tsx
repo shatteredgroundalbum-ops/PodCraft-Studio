@@ -123,7 +123,7 @@ const LAST_PROFILE_KEY    = 'podcraft_last_room_profile_v2';
 const PROFILE_HISTORY_KEY = 'podcraft_room_profile_history';
 
 /* ─── Main component ─────────────────────────────────────────── */
-export function AudioSetupModal() {
+export function AudioSetupModal({ onProceedToProject }: { onProceedToProject?: () => void } = {}) {
   const { setAudioSetupDone, applyRoomProfile } = useStudio();
 
   /* Step state */
@@ -339,7 +339,11 @@ export function AudioSetupModal() {
       localStorage.setItem(PROFILE_HISTORY_KEY, JSON.stringify(history.slice(0, 20)));
     } catch { /* ignore storage errors */ }
 
-    setAudioSetupDone(true);
+    if (onProceedToProject) {
+      onProceedToProject();
+    } else {
+      setAudioSetupDone(true);
+    }
   };
 
   /* ── Navigation ───────────────────────────────────────────── */
@@ -440,7 +444,11 @@ export function AudioSetupModal() {
             </button>
             <button onClick={handleNext} disabled={!canNext}
               className="flex items-center gap-1.5 px-5 py-2 text-sm font-bold text-white bg-violet-600 rounded-xl hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed">
-              {isLast ? <><Check className="w-4 h-4"/> Apply &amp; Finish</> : <>Next <ChevronRight className="w-4 h-4"/></>}
+              {isLast
+                ? onProceedToProject
+                  ? <>Next: Project Setup <ChevronRight className="w-4 h-4"/></>
+                  : <><Check className="w-4 h-4"/> Apply &amp; Finish</>
+                : <>Next <ChevronRight className="w-4 h-4"/></>}
             </button>
           </div>
         </div>
