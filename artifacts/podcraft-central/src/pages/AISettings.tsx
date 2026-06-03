@@ -4,14 +4,14 @@ import {
   Cpu, Cloud, Sparkles, List, ChevronDown, ChevronRight,
   CheckCircle2, AlertTriangle, AlertCircle, Download, Trash2,
   Loader2, Eye, EyeOff, HardDrive, Zap, RefreshCw,
-  ExternalLink, Check, Info, WifiOff, Wifi, Monitor,
+  ExternalLink, Check, Info, WifiOff, Wifi, Monitor, ArrowLeft,
 } from 'lucide-react';
 import { AppLayout } from '../components/AppLayout';
 import {
   AIModelProvider, useAIModel,
   AI_MODULES, AIModuleId, ModuleAssignment,
 } from '../store/AIModelStore';
-import { PROVIDER_DEFS, ProviderStatus, fetchOllamaModelList } from '../utils/multiAI';
+import { PROVIDER_DEFS, ProviderDef, ProviderStatus, fetchOllamaModelList } from '../utils/multiAI';
 import {
   LOCAL_MODELS, LocalModelConfig,
   checkWebGPU, checkStorage, getInstalledModelIds,
@@ -525,7 +525,7 @@ function CloudSection() {
 }
 
 /* ══════════════════════════════════════════════════════════════════
-   Pipeline Section — recommendations
+   Pipeline Section — Real setup: preflight → download/connect → assign
 ══════════════════════════════════════════════════════════════════ */
 const HIGH_INTELLIGENCE = new Set(['ai-producer', 'script-writer', 'search-research', 'storyboard', 'pipeline']);
 const CLOUD_PREF: Record<string, string[]> = {
@@ -550,52 +550,62 @@ const LOCAL_QUALITY = [
   'HuggingFaceTB/SmolLM2-135M-Instruct',
 ];
 
+/* ── Pipeline types ─────────────────────────────────────────────── */
+type PipelinePhase = 'configure' | 'preflight' | 'running' | 'done';
+
+interface ModulePlan {
+  moduleId: string; moduleName: string; moduleDesc: string;
+  kind: 'ready' | 'load-local' | 'download-local' | 'connect-cloud' | 'unavailable';
+  targetAssignment: ModuleAssignment | null;
+  localModel?: LocalModelConfig;
+  providerId?: string; providerName?: string;
+  note: string;
+  status: 'pending' | 'running' | 'done' | 'failed' | 'unavailable';
+}
+
+interface LocalSetupOp {
+  id: string; model: LocalModelConfig; kind: 'download' | 'load';
+  status: 'pending' | 'checking-storage' | 'downloading' | 'loading' | 'done' | 'failed';
+  progress: number; error?: string;
+}
+
+interface CloudSetupOp {
+  id: string; providerDef: ProviderDef;
+  status: 'pending' | 'validating' | 'connected' | 'failed';
+  error?: string;
+}
+
+/* ── Configure phase: overview display ──────────────────────────── */
 interface Rec { assignment: ModuleAssignment | null; note: string; status: 'ready' | 'requires-setup'; setupMsg?: string; }
 
-function buildRecs(
-  mode: PipelineMode,
-  providerStates: Record<string, any>,
-  loadedIds: string[],
-): Record<AIModuleId, Rec> {
+function buildRecs(mode: PipelineMode, providerStates: Record<string, any>, loadedIds: string[]): Record<AIModuleId, Rec> {
   const result: Record<string, Rec> = {};
   const connectedProviders = PROVIDER_DEFS.filter(d => providerStates[d.id]?.status === 'connected');
   const bestLocal = LOCAL_QUALITY.find(id => loadedIds.includes(id)) ?? null;
   const bestLocalMeta = bestLocal ? LOCAL_MODELS.find(m => m.id === bestLocal) : null;
-
   for (const mod of AI_MODULES) {
     const isHigh = HIGH_INTELLIGENCE.has(mod.id);
     let rec: Rec;
-
     if (mode === 'local') {
-      if (bestLocal && bestLocalMeta) {
-        rec = { assignment: { providerId: 'local', modelId: bestLocal, providerName: 'Local AI', modelName: bestLocalMeta.name, isLocal: true }, note: `Local: ${bestLocalMeta.name}`, status: 'ready' };
-      } else {
-        rec = { assignment: null, note: 'No local model loaded', status: 'requires-setup', setupMsg: 'Requires Download & Load' };
-      }
+      rec = bestLocal && bestLocalMeta
+        ? { assignment: { providerId: 'local', modelId: bestLocal, providerName: 'Local AI', modelName: bestLocalMeta.name, isLocal: true }, note: `Local: ${bestLocalMeta.name}`, status: 'ready' }
+        : { assignment: null, note: 'No local model loaded', status: 'requires-setup', setupMsg: 'Download Required' };
     } else if (mode === 'cloud') {
       const pref = CLOUD_PREF[mod.id] ?? ['openai'];
       const provider = connectedProviders.find(p => pref.includes(p.id));
-      if (provider) {
-        const model = provider.models[0];
-        rec = { assignment: { providerId: provider.id, modelId: model.id, providerName: provider.name, modelName: model.name, isLocal: false }, note: `${provider.name} / ${model.name}`, status: 'ready' };
-      } else {
-        const preferredId = pref[0];
-        const preferred = PROVIDER_DEFS.find(p => p.id === preferredId);
-        rec = { assignment: null, note: preferred ? `${preferred.name} recommended` : 'No cloud provider connected', status: 'requires-setup', setupMsg: `Requires Connection` };
-      }
+      rec = provider
+        ? { assignment: { providerId: provider.id, modelId: provider.models[0].id, providerName: provider.name, modelName: provider.models[0].name, isLocal: false }, note: `${provider.name} / ${provider.models[0].name}`, status: 'ready' }
+        : { assignment: null, note: `${PROVIDER_DEFS.find(p => p.id === (pref[0] ?? 'openai'))?.name ?? 'Cloud'} recommended`, status: 'requires-setup', setupMsg: 'API Key Required' };
     } else {
-      // hybrid: high intelligence → cloud, low → local
       if (isHigh) {
         const pref = CLOUD_PREF[mod.id] ?? ['openai'];
         const provider = connectedProviders.find(p => pref.includes(p.id));
         if (provider) {
-          const model = provider.models[0];
-          rec = { assignment: { providerId: provider.id, modelId: model.id, providerName: provider.name, modelName: model.name, isLocal: false }, note: `${provider.name} / ${model.name}`, status: 'ready' };
+          rec = { assignment: { providerId: provider.id, modelId: provider.models[0].id, providerName: provider.name, modelName: provider.models[0].name, isLocal: false }, note: `${provider.name} / ${provider.models[0].name}`, status: 'ready' };
         } else if (bestLocal && bestLocalMeta) {
           rec = { assignment: { providerId: 'local', modelId: bestLocal, providerName: 'Local AI', modelName: bestLocalMeta.name, isLocal: true }, note: `Local fallback: ${bestLocalMeta.name}`, status: 'ready' };
         } else {
-          const pName = PROVIDER_DEFS.find(p => p.id === (CLOUD_PREF[mod.id]?.[0] ?? 'openai'))?.name ?? 'Cloud';
-          rec = { assignment: null, note: `${pName} recommended`, status: 'requires-setup', setupMsg: 'Requires Connection or Download' };
+          rec = { assignment: null, note: `${PROVIDER_DEFS.find(p => p.id === (CLOUD_PREF[mod.id]?.[0] ?? 'openai'))?.name ?? 'Cloud'} recommended`, status: 'requires-setup', setupMsg: 'API Key Required or Download' };
         }
       } else {
         if (bestLocal && bestLocalMeta) {
@@ -603,93 +613,610 @@ function buildRecs(
         } else {
           const pref = CLOUD_PREF[mod.id] ?? ['openai'];
           const provider = connectedProviders.find(p => pref.includes(p.id));
-          if (provider) {
-            const model = provider.models[0];
-            rec = { assignment: { providerId: provider.id, modelId: model.id, providerName: provider.name, modelName: model.name, isLocal: false }, note: `Cloud fallback: ${provider.name}`, status: 'ready' };
-          } else {
-            rec = { assignment: null, note: 'No local model loaded', status: 'requires-setup', setupMsg: 'Requires Download or Connection' };
-          }
+          rec = provider
+            ? { assignment: { providerId: provider.id, modelId: provider.models[0].id, providerName: provider.name, modelName: provider.models[0].name, isLocal: false }, note: `Cloud fallback: ${provider.name}`, status: 'ready' }
+            : { assignment: null, note: 'No local or cloud available', status: 'requires-setup', setupMsg: 'Download or Connect' };
         }
       }
     }
-
     result[mod.id as AIModuleId] = rec;
   }
   return result as Record<AIModuleId, Rec>;
 }
 
-function PipelineSection() {
-  const { providerStates, loadedLocalModelIds, assignModule } = useAIModel();
-  const [mode, setMode] = useState<PipelineMode>('hybrid');
-  const [applied, setApplied] = useState(false);
+/* ── Plan builder for execution ─────────────────────────────────── */
+function buildModulePlan(
+  mode: PipelineMode,
+  providerStates: Record<string, any>,
+  loadedIds: string[],
+  installedIds: string[],
+  hasWebGPU: boolean | null,
+  storage: { available: number } | null,
+): { plans: ModulePlan[]; localOps: LocalSetupOp[]; cloudOps: CloudSetupOp[] } {
+  const plans: ModulePlan[] = [];
+  const localOpsMap = new Map<string, LocalSetupOp>();
+  const cloudOpsMap = new Map<string, CloudSetupOp>();
+  const connectedProviders = PROVIDER_DEFS.filter(d => providerStates[d.id]?.status === 'connected');
+  const bestLoadedId = LOCAL_QUALITY.find(id => loadedIds.includes(id));
+  const bestLoaded = bestLoadedId ? (LOCAL_MODELS.find(m => m.id === bestLoadedId) ?? null) : null;
 
-  const recs = buildRecs(mode, providerStates, loadedLocalModelIds);
-  const readyCount = Object.values(recs).filter(r => r.status === 'ready').length;
-
-  const applyAll = () => {
-    for (const [moduleId, rec] of Object.entries(recs)) {
-      if (rec.assignment) assignModule(moduleId, rec.assignment);
+  function pickTargetLocalModel(): LocalModelConfig {
+    const fallback = LOCAL_MODELS.find(m => m.id === 'HuggingFaceTB/SmolLM2-135M-Instruct')!;
+    for (const id of LOCAL_QUALITY) {
+      const m = LOCAL_MODELS.find(x => x.id === id);
+      if (!m) continue;
+      const compatible = !m.requiresWebGPU || hasWebGPU === true;
+      const fits = !storage || storage.available > m.sizeBytes * 1.2;
+      if (compatible && fits) return m;
     }
-    setApplied(true);
-    setTimeout(() => setApplied(false), 2500);
+    return fallback;
+  }
+
+  for (const mod of AI_MODULES) {
+    const isHigh = HIGH_INTELLIGENCE.has(mod.id);
+    const base = { moduleId: mod.id, moduleName: mod.label, moduleDesc: mod.description };
+    const useLocal = mode === 'local' || (mode === 'hybrid' && !isHigh);
+    let plan: ModulePlan;
+
+    if (useLocal) {
+      if (bestLoaded) {
+        plan = { ...base, kind: 'ready', targetAssignment: { providerId: 'local', modelId: bestLoaded.id, providerName: 'Local AI', modelName: bestLoaded.name, isLocal: true }, localModel: bestLoaded, note: `Local · ${bestLoaded.name}`, status: 'pending' };
+      } else {
+        const target = pickTargetLocalModel();
+        const compatible = !target.requiresWebGPU || hasWebGPU === true;
+        const isLoaded = loadedIds.includes(target.id);
+        const isInst = installedIds.includes(target.id);
+        if (!compatible) {
+          plan = { ...base, kind: 'unavailable', targetAssignment: null, note: 'Unsupported — WebGPU unavailable on this device', status: 'unavailable' };
+        } else if (isLoaded) {
+          plan = { ...base, kind: 'ready', targetAssignment: { providerId: 'local', modelId: target.id, providerName: 'Local AI', modelName: target.name, isLocal: true }, localModel: target, note: `Local · ${target.name}`, status: 'pending' };
+        } else {
+          const kind = isInst ? 'load-local' : 'download-local';
+          plan = { ...base, kind, targetAssignment: null, localModel: target, note: isInst ? `Load ${target.name}` : `Download · ${target.name} · ${target.sizeLabel}`, status: 'pending' };
+          if (!localOpsMap.has(target.id)) {
+            localOpsMap.set(target.id, { id: target.id, model: target, kind: isInst ? 'load' : 'download', status: 'pending', progress: 0 });
+          }
+        }
+      }
+    } else {
+      const pref = CLOUD_PREF[mod.id] ?? ['openai'];
+      const conn = connectedProviders.find(p => pref.includes(p.id));
+      if (conn) {
+        const model = conn.models[0];
+        plan = { ...base, kind: 'ready', targetAssignment: { providerId: conn.id, modelId: model.id, providerName: conn.name, modelName: model.name, isLocal: false }, providerId: conn.id, providerName: conn.name, note: `${conn.name} · ${model.name}`, status: 'pending' };
+      } else {
+        const preferred = PROVIDER_DEFS.find(p => pref.includes(p.id) && p.browserCompatible && p.inferenceCategory !== 'unsupported');
+        if (preferred) {
+          plan = { ...base, kind: 'connect-cloud', targetAssignment: null, providerId: preferred.id, providerName: preferred.name, note: `Connect ${preferred.name}`, status: 'pending' };
+          if (!cloudOpsMap.has(preferred.id)) {
+            cloudOpsMap.set(preferred.id, { id: preferred.id, providerDef: preferred, status: 'pending' });
+          }
+        } else if (mode === 'hybrid' && bestLoaded) {
+          plan = { ...base, kind: 'ready', targetAssignment: { providerId: 'local', modelId: bestLoaded.id, providerName: 'Local AI', modelName: bestLoaded.name, isLocal: true }, localModel: bestLoaded, note: `Local fallback · ${bestLoaded.name}`, status: 'pending' };
+        } else {
+          plan = { ...base, kind: 'unavailable', targetAssignment: null, note: 'No compatible provider available', status: 'unavailable' };
+        }
+      }
+    }
+    plans.push(plan);
+  }
+
+  return { plans, localOps: Array.from(localOpsMap.values()), cloudOps: Array.from(cloudOpsMap.values()) };
+}
+
+/* ── Sub-components ─────────────────────────────────────────────── */
+function KindBadge({ kind, status }: { kind: ModulePlan['kind']; status: ModulePlan['status'] }) {
+  if (status === 'done')
+    return <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-semibold"><CheckCircle2 className="w-3 h-3"/>Done</span>;
+  if (status === 'failed')
+    return <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-600 font-semibold"><AlertCircle className="w-3 h-3"/>Failed</span>;
+  if (status === 'unavailable' || kind === 'unavailable')
+    return <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500"><AlertTriangle className="w-3 h-3"/>Unavailable</span>;
+  if (kind === 'ready')
+    return <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-600 border border-green-200 font-medium"><CheckCircle2 className="w-3 h-3"/>Ready to assign</span>;
+  if (kind === 'download-local')
+    return <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 border border-violet-200"><Download className="w-3 h-3"/>Download required</span>;
+  if (kind === 'load-local')
+    return <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200"><Zap className="w-3 h-3"/>Load required</span>;
+  if (kind === 'connect-cloud')
+    return <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200"><Wifi className="w-3 h-3"/>API Key Required</span>;
+  return null;
+}
+
+function LocalOpRow({ op }: { op: LocalSetupOp }) {
+  const LABELS: Record<LocalSetupOp['status'], string> = {
+    pending: 'Waiting…', 'checking-storage': 'Checking storage…',
+    downloading: 'Downloading…', loading: 'Loading into runtime…',
+    done: 'Ready', failed: 'Failed',
   };
+  const active = op.status === 'downloading' || op.status === 'loading';
+  return (
+    <div className="flex flex-col gap-1.5 px-5 py-3.5 border-b border-gray-50 last:border-0">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          {op.status === 'done' ? <CheckCircle2 className="w-4 h-4 text-green-500 flex-shrink-0"/> :
+           op.status === 'failed' ? <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0"/> :
+           active ? <Loader2 className="w-4 h-4 text-violet-500 animate-spin flex-shrink-0"/> :
+           <Download className="w-4 h-4 text-gray-300 flex-shrink-0"/>}
+          <span className="text-sm font-semibold text-gray-800 truncate">{op.model.name}</span>
+          <span className="text-xs text-gray-400 flex-shrink-0">{op.model.sizeLabel}</span>
+        </div>
+        <span className={`text-xs flex-shrink-0 font-medium ${op.status === 'done' ? 'text-green-600' : op.status === 'failed' ? 'text-red-500' : active ? 'text-violet-600' : 'text-gray-400'}`}>
+          {LABELS[op.status]}{active && op.progress > 0 ? ` ${op.progress}%` : ''}
+        </span>
+      </div>
+      {active && (
+        <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden ml-6">
+          <div className="h-full bg-violet-500 rounded-full transition-all duration-300" style={{ width: `${Math.max(2, op.progress)}%` }}/>
+        </div>
+      )}
+      {op.status === 'failed' && op.error && <p className="text-xs text-red-500 ml-6">{op.error}</p>}
+    </div>
+  );
+}
+
+function CloudOpRow({ op }: { op: CloudSetupOp }) {
+  const LABELS: Record<CloudSetupOp['status'], string> = {
+    pending: 'Waiting…', validating: 'Validating…', connected: 'Connected', failed: 'Failed',
+  };
+  return (
+    <div className="flex items-center justify-between gap-2 px-5 py-3.5 border-b border-gray-50 last:border-0">
+      <div className="flex items-center gap-2">
+        {op.status === 'connected' ? <CheckCircle2 className="w-4 h-4 text-green-500"/> :
+         op.status === 'failed' ? <AlertCircle className="w-4 h-4 text-red-500"/> :
+         op.status === 'validating' ? <Loader2 className="w-4 h-4 text-blue-500 animate-spin"/> :
+         <Wifi className="w-4 h-4 text-gray-300"/>}
+        <span className="text-sm font-semibold text-gray-800">{op.providerDef.name}</span>
+      </div>
+      <div className="text-right">
+        <span className={`text-xs font-medium ${op.status === 'connected' ? 'text-green-600' : op.status === 'failed' ? 'text-red-500' : op.status === 'validating' ? 'text-blue-500' : 'text-gray-400'}`}>
+          {LABELS[op.status]}
+        </span>
+        {op.status === 'failed' && op.error && <div className="text-[10px] text-red-400 mt-0.5">{op.error}</div>}
+      </div>
+    </div>
+  );
+}
+
+/* ── Main component ─────────────────────────────────────────────── */
+function PipelineSection() {
+  const { providerStates, loadedLocalModelIds, assignModule, connectProvider, registerLocalPipeline } = useAIModel();
+  const [mode, setMode] = useState<PipelineMode>('hybrid');
+  const [phase, setPhase] = useState<PipelinePhase>('configure');
+  const [hasWebGPU, setHasWebGPU] = useState<boolean | null>(null);
+  const [storageAvailable, setStorageAvailable] = useState<number | null>(null);
+  const [installedIds, setInstalledIds] = useState<string[]>([]);
+  const [modulePlans, setModulePlans] = useState<ModulePlan[]>([]);
+  const [localSetupOps, setLocalSetupOps] = useState<LocalSetupOp[]>([]);
+  const [cloudSetupOps, setCloudSetupOps] = useState<CloudSetupOp[]>([]);
+  const [apiKeys, setApiKeys] = useState<Record<string, string>>({});
+  const [showKey, setShowKey] = useState<Record<string, boolean>>({});
+  const plansRef = useRef<ModulePlan[]>([]);
+  const localOpsRef = useRef<LocalSetupOp[]>([]);
+  const cloudOpsRef = useRef<CloudSetupOp[]>([]);
+  const apiKeysRef = useRef<Record<string, string>>({});
+  const isRunningRef = useRef(false);
+
+  useEffect(() => {
+    checkWebGPU().then(setHasWebGPU);
+    checkStorage().then(s => setStorageAvailable(s.available));
+    setInstalledIds(getInstalledModelIds());
+  }, []);
+
+  const enterPreflight = useCallback(() => {
+    const storage = storageAvailable !== null ? { available: storageAvailable } : null;
+    const { plans, localOps, cloudOps } = buildModulePlan(mode, providerStates, loadedLocalModelIds, installedIds, hasWebGPU, storage);
+    const keys: Record<string, string> = {};
+    cloudOps.forEach(op => { keys[op.id] = providerStates[op.id]?.apiKey ?? ''; });
+    plansRef.current = plans;
+    localOpsRef.current = localOps;
+    cloudOpsRef.current = cloudOps;
+    apiKeysRef.current = keys;
+    setModulePlans(plans);
+    setLocalSetupOps(localOps);
+    setCloudSetupOps(cloudOps);
+    setApiKeys(keys);
+    setPhase('preflight');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, providerStates, loadedLocalModelIds, installedIds, hasWebGPU, storageAvailable]);
+
+  const runSetup = async () => {
+    if (isRunningRef.current) return;
+    isRunningRef.current = true;
+    setPhase('running');
+
+    const plans = plansRef.current;
+    const keys = apiKeysRef.current;
+
+    const patchPlan = (moduleId: string, patch: Partial<ModulePlan>) =>
+      setModulePlans(prev => prev.map(p => p.moduleId === moduleId ? { ...p, ...patch } : p));
+    const patchLocal = (id: string, patch: Partial<LocalSetupOp>) =>
+      setLocalSetupOps(prev => prev.map(op => op.id === id ? { ...op, ...patch } : op));
+    const patchCloud = (id: string, patch: Partial<CloudSetupOp>) =>
+      setCloudSetupOps(prev => prev.map(op => op.id === id ? { ...op, ...patch } : op));
+
+    /* 1. Assign already-ready modules immediately */
+    plans.filter(p => p.kind === 'ready' && p.targetAssignment).forEach(p => {
+      assignModule(p.moduleId, p.targetAssignment!);
+      patchPlan(p.moduleId, { status: 'done' });
+    });
+
+    /* 2. Cloud provider validation — all in parallel */
+    const cloudPromises = cloudOpsRef.current.map(async op => {
+      const key = keys[op.id] ?? '';
+      if (!key && op.providerDef.needsKey) {
+        patchCloud(op.id, { status: 'failed', error: 'No API key provided' });
+        plans.filter(p => p.providerId === op.id).forEach(p => patchPlan(p.moduleId, { status: 'failed', note: 'No API key provided — enter key in preflight and retry' }));
+        return;
+      }
+      patchCloud(op.id, { status: 'validating' });
+      try {
+        const ok = await connectProvider(op.id, key);
+        if (ok) {
+          patchCloud(op.id, { status: 'connected' });
+          const def = PROVIDER_DEFS.find(d => d.id === op.id);
+          const model = def?.models[0];
+          plans.filter(p => p.providerId === op.id).forEach(p => {
+            if (def && model) {
+              assignModule(p.moduleId, { providerId: def.id, modelId: model.id, providerName: def.name, modelName: model.name, isLocal: false });
+              patchPlan(p.moduleId, { status: 'done', note: `${def.name} · ${model.name}` });
+            }
+          });
+        } else {
+          patchCloud(op.id, { status: 'failed', error: 'Invalid key or connection refused' });
+          plans.filter(p => p.providerId === op.id).forEach(p => patchPlan(p.moduleId, { status: 'failed', note: 'Provider connection failed' }));
+        }
+      } catch (e: any) {
+        const msg = e?.message ?? 'Network error';
+        patchCloud(op.id, { status: 'failed', error: msg });
+        plans.filter(p => p.providerId === op.id).forEach(p => patchPlan(p.moduleId, { status: 'failed', note: msg }));
+      }
+    });
+
+    /* 3. Local model downloads/loads — sequential (one at a time) */
+    for (const op of localOpsRef.current) {
+      patchLocal(op.id, { status: 'checking-storage' });
+      await new Promise(r => setTimeout(r, 350));
+      const nowInstalled = getInstalledModelIds().includes(op.id);
+      patchLocal(op.id, { status: nowInstalled ? 'loading' : 'downloading', progress: 0 });
+      try {
+        const pipe = await loadLocalModel(op.model, (info) => {
+          const pct = info.progress !== undefined ? Math.round(info.progress) : 0;
+          patchLocal(op.id, { progress: pct });
+        }, !!hasWebGPU);
+        registerLocalPipeline(op.id, pipe, op.model.name);
+        setInstalledIds(getInstalledModelIds());
+        patchLocal(op.id, { status: 'done', progress: 100 });
+        plans.filter(p => p.localModel?.id === op.id).forEach(p => {
+          assignModule(p.moduleId, { providerId: 'local', modelId: op.id, providerName: 'Local AI', modelName: op.model.name, isLocal: true });
+          patchPlan(p.moduleId, { status: 'done', note: `Local · ${op.model.name}` });
+        });
+      } catch (e: any) {
+        const msg = e?.message ?? 'Load failed';
+        patchLocal(op.id, { status: 'failed', error: msg });
+        plans.filter(p => p.localModel?.id === op.id).forEach(p => patchPlan(p.moduleId, { status: 'failed', note: msg }));
+      }
+    }
+
+    await Promise.all(cloudPromises);
+    isRunningRef.current = false;
+    setPhase('done');
+  };
+
+  /* ── Configure ────────────────────────────────────────────────── */
+  if (phase === 'configure') {
+    const recs = buildRecs(mode, providerStates, loadedLocalModelIds);
+    const readyCount = Object.values(recs).filter(r => r.status === 'ready').length;
+    const needsSetup = Object.values(recs).filter(r => r.status === 'requires-setup').length;
+    return (
+      <div className="space-y-5">
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <h3 className="text-sm font-bold text-gray-900 mb-1">Pipeline Mode</h3>
+          <p className="text-xs text-gray-500 mb-4">Choose how AI modules are powered across the app.</p>
+          <div className="flex gap-2">
+            {([['local', 'Local Only', 'Runs entirely on your device'], ['hybrid', 'Hybrid', 'Cloud for complex tasks, Local for simple ones'], ['cloud', 'Cloud Only', 'All modules routed to cloud providers']] as const).map(([id, label, desc]) => (
+              <button key={id} onClick={() => setMode(id)}
+                className={`flex-1 px-3 py-3 rounded-xl border-2 text-left transition-all ${mode === id ? 'border-violet-500 bg-violet-50' : 'border-gray-200 hover:border-gray-300'}`}>
+                <div className={`text-sm font-semibold ${mode === id ? 'text-violet-700' : 'text-gray-700'}`}>{label}</div>
+                <div className="text-[10px] text-gray-400 mt-0.5 leading-tight">{desc}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-3.5 border-b border-gray-100">
+            <div>
+              <span className="text-sm font-bold text-gray-900">Module Recommendations</span>
+              <span className="ml-2 text-xs text-gray-400">{readyCount}/{AI_MODULES.length} ready</span>
+            </div>
+            <button onClick={enterPreflight}
+              className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-violet-600 rounded-lg hover:bg-violet-700 transition-all">
+              <Sparkles className="w-4 h-4"/> Apply Recommendations
+            </button>
+          </div>
+          <div className="divide-y divide-gray-100">
+            {AI_MODULES.map(mod => {
+              const rec = recs[mod.id as AIModuleId];
+              return (
+                <div key={mod.id} className="flex items-center gap-4 px-5 py-3.5">
+                  <div className="w-44 flex-shrink-0">
+                    <div className="text-sm font-medium text-gray-900">{mod.label}</div>
+                    <div className="text-[10px] text-gray-400">{mod.description}</div>
+                  </div>
+                  <div className="flex-1 flex items-center gap-2">
+                    <span className={`inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg font-medium ${rec.status === 'ready' ? 'bg-green-100 text-green-700' : 'bg-amber-50 text-amber-700 border border-amber-200'}`}>
+                      {rec.status === 'ready' ? <><CheckCircle2 className="w-3 h-3"/>{rec.note}</> : <><AlertTriangle className="w-3 h-3"/>{rec.setupMsg}</>}
+                    </span>
+                    {rec.status === 'requires-setup' && rec.note !== rec.setupMsg && (
+                      <span className="text-[10px] text-gray-400">{rec.note}</span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {needsSetup > 0 && (
+          <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-start gap-1.5">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5"/>
+            {needsSetup} module{needsSetup > 1 ? 's' : ''} need{needsSetup === 1 ? 's' : ''} setup. Click <strong>Apply Recommendations</strong> to see the full plan, enter any required API keys, and start real configuration.
+          </div>
+        )}
+        <div className="text-xs text-gray-400 bg-gray-50 rounded-xl p-3 flex items-start gap-1.5">
+          <Info className="w-3.5 h-3.5 shrink-0 mt-0.5"/>
+          Applying runs a preflight check, then downloads/connects/assigns each module for real. Ready only appears after a model loads through the runtime or a provider validates successfully. No simulated states.
+        </div>
+      </div>
+    );
+  }
+
+  /* ── Preflight ────────────────────────────────────────────────── */
+  if (phase === 'preflight') {
+    const dlCount = localSetupOps.filter(op => op.kind === 'download').length;
+    const loadCount = localSetupOps.filter(op => op.kind === 'load').length;
+    const readyCount = modulePlans.filter(p => p.kind === 'ready').length;
+    const unavailCount = modulePlans.filter(p => p.kind === 'unavailable').length;
+    const hasActions = readyCount > 0 || localSetupOps.length > 0 || cloudSetupOps.length > 0;
+
+    return (
+      <div className="space-y-5">
+        {/* Header */}
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <div className="flex items-center gap-2 mb-1">
+            <button onClick={() => setPhase('configure')} className="text-gray-400 hover:text-gray-700 transition-colors flex-shrink-0">
+              <ArrowLeft className="w-4 h-4"/>
+            </button>
+            <h3 className="text-sm font-bold text-gray-900">
+              Setup Plan — {mode === 'local' ? 'Local Only' : mode === 'cloud' ? 'Cloud Only' : 'Hybrid'} Pipeline
+            </h3>
+          </div>
+          <p className="text-xs text-gray-500 ml-6">Review what will happen before starting. Enter API keys for any cloud providers below.</p>
+          <div className="mt-4 flex flex-wrap gap-2 ml-6">
+            {readyCount > 0 && <span className="inline-flex items-center gap-1 text-xs bg-green-50 text-green-700 border border-green-200 px-2.5 py-1 rounded-full"><CheckCircle2 className="w-3 h-3"/>{readyCount} already ready</span>}
+            {dlCount > 0 && <span className="inline-flex items-center gap-1 text-xs bg-violet-50 text-violet-700 border border-violet-200 px-2.5 py-1 rounded-full"><Download className="w-3 h-3"/>Download {dlCount} local model{dlCount > 1 ? 's' : ''}</span>}
+            {loadCount > 0 && <span className="inline-flex items-center gap-1 text-xs bg-blue-50 text-blue-700 border border-blue-200 px-2.5 py-1 rounded-full"><Zap className="w-3 h-3"/>Load {loadCount} cached model{loadCount > 1 ? 's' : ''}</span>}
+            {cloudSetupOps.length > 0 && <span className="inline-flex items-center gap-1 text-xs bg-amber-50 text-amber-700 border border-amber-200 px-2.5 py-1 rounded-full"><Wifi className="w-3 h-3"/>Connect {cloudSetupOps.length} cloud provider{cloudSetupOps.length > 1 ? 's' : ''}</span>}
+            {unavailCount > 0 && <span className="inline-flex items-center gap-1 text-xs bg-gray-100 text-gray-500 px-2.5 py-1 rounded-full"><AlertTriangle className="w-3 h-3"/>{unavailCount} unavailable</span>}
+          </div>
+        </div>
+
+        {/* Per-module plan */}
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="px-5 py-2.5 border-b border-gray-100 bg-gray-50">
+            <span className="text-xs font-bold text-gray-500 uppercase tracking-wide">Module → Planned Action</span>
+          </div>
+          <div className="divide-y divide-gray-50">
+            {modulePlans.map(plan => (
+              <div key={plan.moduleId} className="flex items-center gap-3 px-5 py-3">
+                <div className="w-40 flex-shrink-0">
+                  <div className="text-sm font-medium text-gray-900">{plan.moduleName}</div>
+                  <div className="text-[10px] text-gray-400">{plan.moduleDesc}</div>
+                </div>
+                <div className="flex-1 text-xs text-gray-500 min-w-0 truncate">{plan.note}</div>
+                <div className="flex-shrink-0"><KindBadge kind={plan.kind} status={plan.status}/></div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* API key inputs */}
+        {cloudSetupOps.length > 0 && (
+          <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+            <div>
+              <h4 className="text-sm font-bold text-gray-900 mb-0.5">API Keys Required</h4>
+              <p className="text-xs text-gray-500">Keys are stored locally on your device and sent only to the respective provider's API for validation.</p>
+            </div>
+            {cloudSetupOps.map(op => (
+              <div key={op.id}>
+                <label className="block text-xs font-semibold text-gray-700 mb-1.5">{op.providerDef.name}</label>
+                {op.providerDef.needsKey ? (
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <input
+                        type={showKey[op.id] ? 'text' : 'password'}
+                        value={apiKeys[op.id] ?? ''}
+                        onChange={e => {
+                          const v = e.target.value;
+                          apiKeysRef.current = { ...apiKeysRef.current, [op.id]: v };
+                          setApiKeys(prev => ({ ...prev, [op.id]: v }));
+                        }}
+                        placeholder={op.providerDef.keyPlaceholder}
+                        className="w-full pr-9 pl-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:outline-none focus:border-violet-400 bg-white"
+                      />
+                      <button type="button" onClick={() => setShowKey(p => ({ ...p, [op.id]: !p[op.id] }))}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                        {showKey[op.id] ? <EyeOff className="w-4 h-4"/> : <Eye className="w-4 h-4"/>}
+                      </button>
+                    </div>
+                    {op.providerDef.docsUrl && (
+                      <a href={op.providerDef.docsUrl} target="_blank" rel="noreferrer"
+                        className="flex items-center gap-1 px-2.5 py-2 text-xs text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50 flex-shrink-0">
+                        <ExternalLink className="w-3 h-3"/> Get key
+                      </a>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-xs text-green-600">✓ No key required — will connect automatically</p>
+                )}
+                <p className="text-[10px] text-gray-400 mt-1">{op.providerDef.keyHint}</p>
+              </div>
+            ))}
+            <p className="text-[10px] text-gray-400 border-t border-gray-100 pt-3">Providers without a key will be skipped and marked Failed. You can connect them manually in the Cloud tab.</p>
+          </div>
+        )}
+
+        {/* Action buttons */}
+        <div className="flex items-center gap-3">
+          <button onClick={() => setPhase('configure')}
+            className="flex items-center gap-1.5 px-4 py-2.5 text-sm font-semibold text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-all">
+            <ArrowLeft className="w-4 h-4"/> Back
+          </button>
+          <button onClick={runSetup} disabled={!hasActions}
+            className="flex items-center gap-1.5 px-5 py-2.5 text-sm font-semibold text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all">
+            <Sparkles className="w-4 h-4"/> Start Setup
+          </button>
+          {!hasActions && <span className="text-xs text-gray-400">No actionable modules — all are unavailable for this configuration.</span>}
+        </div>
+      </div>
+    );
+  }
+
+  /* ── Running ──────────────────────────────────────────────────── */
+  if (phase === 'running') {
+    const doneCount = modulePlans.filter(p => p.status === 'done' || p.status === 'failed').length;
+    const actionable = modulePlans.filter(p => p.kind !== 'unavailable').length;
+    return (
+      <div className="space-y-5">
+        {/* Overall progress */}
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <Loader2 className="w-4 h-4 text-violet-500 animate-spin"/>
+              <span className="text-sm font-bold text-gray-900">Setting up pipeline…</span>
+            </div>
+            <span className="text-xs text-gray-400">{doneCount}/{actionable} modules complete</span>
+          </div>
+          <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+            <div className="h-full bg-violet-500 rounded-full transition-all duration-500"
+              style={{ width: `${actionable > 0 ? Math.round((doneCount / actionable) * 100) : 0}%` }}/>
+          </div>
+        </div>
+
+        {/* Local model queue */}
+        {localSetupOps.length > 0 && (
+          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+            <div className="px-5 py-2.5 border-b border-gray-100 bg-gray-50">
+              <span className="text-xs font-bold text-gray-500 uppercase tracking-wide">Local Model Queue</span>
+            </div>
+            {localSetupOps.map(op => <LocalOpRow key={op.id} op={op}/>)}
+          </div>
+        )}
+
+        {/* Cloud validations */}
+        {cloudSetupOps.length > 0 && (
+          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+            <div className="px-5 py-2.5 border-b border-gray-100 bg-gray-50">
+              <span className="text-xs font-bold text-gray-500 uppercase tracking-wide">Cloud Provider Validation</span>
+            </div>
+            {cloudSetupOps.map(op => <CloudOpRow key={op.id} op={op}/>)}
+          </div>
+        )}
+
+        {/* Module assignment status */}
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="px-5 py-2.5 border-b border-gray-100 bg-gray-50">
+            <span className="text-xs font-bold text-gray-500 uppercase tracking-wide">Module Assignments</span>
+          </div>
+          <div className="divide-y divide-gray-50">
+            {modulePlans.map(plan => (
+              <div key={plan.moduleId} className="flex items-center gap-3 px-5 py-2.5">
+                <div className="w-40 flex-shrink-0 text-sm font-medium text-gray-800">{plan.moduleName}</div>
+                <div className="flex-1 text-xs text-gray-500 truncate">{plan.note}</div>
+                <div className="flex-shrink-0"><KindBadge kind={plan.kind} status={plan.status}/></div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  /* ── Done ─────────────────────────────────────────────────────── */
+  const donePlans  = modulePlans.filter(p => p.status === 'done');
+  const failPlans  = modulePlans.filter(p => p.status === 'failed');
+  const unavPlans  = modulePlans.filter(p => p.kind === 'unavailable');
+  const allOk = failPlans.length === 0;
 
   return (
     <div className="space-y-5">
-      {/* Mode selector */}
-      <div className="bg-white rounded-xl border border-gray-200 p-5">
-        <h3 className="text-sm font-bold text-gray-900 mb-1">Pipeline Mode</h3>
-        <p className="text-xs text-gray-500 mb-4">Choose how AI modules are powered across the app.</p>
-        <div className="flex gap-2">
-          {([['local', 'Local Only', 'Runs entirely on your device'], ['hybrid', 'Hybrid', 'Cloud for complex tasks, Local for simple ones'], ['cloud', 'Cloud Only', 'All modules routed to cloud providers']] as const).map(([id, label, desc]) => (
-            <button key={id} onClick={() => { setMode(id); setApplied(false); }}
-              className={`flex-1 px-3 py-3 rounded-xl border-2 text-left transition-all ${mode === id ? 'border-violet-500 bg-violet-50' : 'border-gray-200 hover:border-gray-300'}`}>
-              <div className={`text-sm font-semibold ${mode === id ? 'text-violet-700' : 'text-gray-700'}`}>{label}</div>
-              <div className="text-[10px] text-gray-400 mt-0.5 leading-tight">{desc}</div>
-            </button>
-          ))}
+      {/* Result header */}
+      <div className={`rounded-xl border p-5 ${allOk ? 'bg-green-50 border-green-200' : 'bg-amber-50 border-amber-200'}`}>
+        <div className="flex items-center gap-2">
+          {allOk ? <CheckCircle2 className="w-5 h-5 text-green-600"/> : <AlertTriangle className="w-5 h-5 text-amber-600"/>}
+          <h3 className="text-sm font-bold text-gray-900">
+            {allOk ? 'Pipeline Applied Successfully' : `Pipeline Applied — ${failPlans.length} item${failPlans.length > 1 ? 's' : ''} failed`}
+          </h3>
         </div>
+        <p className="text-xs text-gray-600 mt-1 ml-7">
+          {donePlans.length} module{donePlans.length !== 1 ? 's' : ''} configured{failPlans.length > 0 ? ` · ${failPlans.length} need attention` : ''}{unavPlans.length > 0 ? ` · ${unavPlans.length} unavailable` : ''}.
+        </p>
       </div>
 
-      {/* Recommendations table */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-gray-100">
-          <div>
-            <span className="text-sm font-bold text-gray-900">Module Recommendations</span>
-            <span className="ml-2 text-xs text-gray-400">{readyCount}/{AI_MODULES.length} ready</span>
+      {/* Ready */}
+      {donePlans.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="px-5 py-2.5 border-b border-gray-100 bg-gray-50">
+            <span className="text-xs font-bold text-green-600 uppercase tracking-wide flex items-center gap-1"><CheckCircle2 className="w-3 h-3"/> Ready ({donePlans.length})</span>
           </div>
-          <button onClick={applyAll}
-            className={`flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-lg transition-all ${applied ? 'bg-green-100 text-green-700' : 'bg-violet-600 text-white hover:bg-violet-700'}`}>
-            {applied ? <><Check className="w-4 h-4" /> Applied!</> : <><Sparkles className="w-4 h-4" /> Apply Recommendations</>}
-          </button>
-        </div>
-
-        <div className="divide-y divide-gray-100">
-          {AI_MODULES.map(mod => {
-            const rec = recs[mod.id as AIModuleId];
-            return (
-              <div key={mod.id} className="flex items-center gap-4 px-5 py-3.5">
-                <div className="w-44 flex-shrink-0">
-                  <div className="text-sm font-medium text-gray-900">{mod.label}</div>
-                  <div className="text-[10px] text-gray-400">{mod.description}</div>
-                </div>
-                <div className="flex-1 flex items-center gap-2">
-                  <span className={`inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg font-medium ${rec.status === 'ready' ? 'bg-green-100 text-green-700' : 'bg-amber-50 text-amber-700 border border-amber-200'}`}>
-                    {rec.status === 'ready' ? <><CheckCircle2 className="w-3 h-3" />{rec.note}</> : <><AlertTriangle className="w-3 h-3" />{rec.setupMsg}</>}
-                  </span>
-                  {rec.status === 'requires-setup' && rec.note !== rec.setupMsg && (
-                    <span className="text-[10px] text-gray-400">{rec.note}</span>
-                  )}
-                </div>
+          <div className="divide-y divide-gray-50">
+            {donePlans.map(p => (
+              <div key={p.moduleId} className="flex items-center justify-between px-5 py-2.5">
+                <span className="text-sm font-medium text-gray-800">{p.moduleName}</span>
+                <span className="text-xs text-gray-500">{p.note}</span>
               </div>
-            );
-          })}
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
-      <div className="text-xs text-gray-400 bg-gray-50 rounded-xl p-3 flex items-start gap-1.5">
-        <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-        Recommendations are based on your connected providers and loaded local models. Only available options are shown — no fake readiness. Apply assigns all ready modules; modules marked "Requires Setup" are skipped.
+      {/* Failed */}
+      {failPlans.length > 0 && (
+        <div className="bg-white rounded-xl border border-red-200 overflow-hidden">
+          <div className="px-5 py-2.5 border-b border-red-100 bg-red-50">
+            <span className="text-xs font-bold text-red-600 uppercase tracking-wide flex items-center gap-1"><AlertCircle className="w-3 h-3"/> Failed ({failPlans.length})</span>
+          </div>
+          <div className="divide-y divide-gray-50">
+            {failPlans.map(p => (
+              <div key={p.moduleId} className="flex items-center justify-between px-5 py-2.5">
+                <span className="text-sm font-medium text-gray-800">{p.moduleName}</span>
+                <span className="text-xs text-red-500">{p.note}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Unavailable warnings */}
+      {unavPlans.length > 0 && (
+        <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-start gap-1.5">
+          <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5"/>
+          <span>{unavPlans.length} module{unavPlans.length > 1 ? 's' : ''} could not be configured ({unavPlans.map(p => p.moduleName).join(', ')}). Check device compatibility or switch to a different pipeline mode.</span>
+        </div>
+      )}
+
+      <div className="flex gap-3">
+        <button onClick={() => setPhase('configure')}
+          className="flex items-center gap-1.5 px-4 py-2.5 text-sm font-semibold text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-all">
+          <ArrowLeft className="w-4 h-4"/> Reconfigure
+        </button>
+        {failPlans.length > 0 && (
+          <button onClick={enterPreflight}
+            className="flex items-center gap-1.5 px-4 py-2.5 text-sm font-semibold text-violet-700 border border-violet-300 bg-violet-50 rounded-lg hover:bg-violet-100 transition-all">
+            <RefreshCw className="w-4 h-4"/> Retry Failed
+          </button>
+        )}
       </div>
     </div>
   );
