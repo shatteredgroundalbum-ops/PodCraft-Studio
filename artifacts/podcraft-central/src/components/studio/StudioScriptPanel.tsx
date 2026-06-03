@@ -20,7 +20,7 @@ interface Version {
   timestamp: number;
 }
 
-export function StudioScriptPanel({ height }: { height: number }) {
+export function StudioScriptPanel({ height }: { height?: number }) {
   const [content, setContent] = useState(
     () => localStorage.getItem('podcraft_script') || DEFAULT_SCRIPT,
   );

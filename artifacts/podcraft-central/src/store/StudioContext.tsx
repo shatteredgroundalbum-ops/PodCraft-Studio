@@ -16,18 +16,38 @@ export interface Track {
   type: TrackType;
   color: string;
   volume: number;
-  pan: number;      // -1 (full left) → 0 (center) → 1 (full right)
+  pan: number;
   muted: boolean;
   soloed: boolean;
   armed: boolean;
+  preset: string;
   clips: AudioClip[];
 }
+
+export interface TrackPresetDef {
+  gain: number;
+  eq: { low: number; mid: number; high: number };
+  compressor: { enabled: boolean; threshold: number; ratio: number };
+  reverb?: boolean;
+}
+
+export const TRACK_PRESETS: Record<string, TrackPresetDef> = {
+  'Podcast Voice - Clean':  { gain: 1.0, eq: { low: -1, mid: 2,  high: 1  }, compressor: { enabled: true,  threshold: -18, ratio: 3 } },
+  'Podcast Voice - Warm':   { gain: 1.0, eq: { low: 3,  mid: 1,  high: -1 }, compressor: { enabled: true,  threshold: -18, ratio: 4 } },
+  'Broadcast Clarity':      { gain: 1.0, eq: { low: -2, mid: 3,  high: 2  }, compressor: { enabled: true,  threshold: -20, ratio: 4 } },
+  'Interview Remote':       { gain: 1.1, eq: { low: -3, mid: 2,  high: 2  }, compressor: { enabled: true,  threshold: -15, ratio: 6 } },
+  'Vehicle/Noise Control':  { gain: 1.0, eq: { low: -6, mid: 1,  high: -2 }, compressor: { enabled: true,  threshold: -12, ratio: 8 } },
+  'Untreated Room':         { gain: 1.0, eq: { low: 0,  mid: 0,  high: 0  }, compressor: { enabled: false, threshold: 0,   ratio: 1 } },
+  'Noisy Room':             { gain: 1.0, eq: { low: -4, mid: 2,  high: -2 }, compressor: { enabled: true,  threshold: -12, ratio: 6 } },
+  'Custom':                 { gain: 1.0, eq: { low: 0,  mid: 0,  high: 0  }, compressor: { enabled: false, threshold: 0,   ratio: 1 } },
+};
 
 interface StudioContextType {
   tracks: Track[];
   addTrack: (type: TrackType, name?: string) => void;
   updateTrack: (id: string, updates: Partial<Track>) => void;
   deleteTrack: (id: string) => void;
+  applyTrackPreset: (trackId: string, preset: string) => void;
   isPlaying: boolean;
   isRecording: boolean;
   playheadPosition: number;
@@ -46,28 +66,22 @@ interface StudioContextType {
   setSelectedInputId: (id: string) => void;
   mixerOpen: boolean;
   setMixerOpen: (open: boolean) => void;
+  mixerDocked: boolean;
+  setMixerDocked: (docked: boolean) => void;
+  audioSetupDone: boolean;
+  setAudioSetupDone: (done: boolean) => void;
 }
 
-const defaultColors = ['#8b5cf6', '#ec4899', '#3b82f6', '#22c55e', '#ef4444'];
 const trackPalette = [
   '#8b5cf6', '#ec4899', '#3b82f6', '#22c55e', '#ef4444',
   '#f59e0b', '#14b8a6', '#6366f1', '#d946ef', '#06b6d4',
   '#84cc16', '#f97316', '#10b981', '#64748b', '#a855f7', '#eab308',
 ];
 
-function makeDefaultTracks(): Track[] {
-  return [
-    { id: '1', name: 'Host A',    type: 'mic',   color: defaultColors[0], volume: 1,   pan: 0, muted: false, soloed: false, armed: true,  clips: [] },
-    { id: '2', name: 'Host B',    type: 'mic',   color: defaultColors[1], volume: 1,   pan: 0, muted: false, soloed: false, armed: false, clips: [] },
-    { id: '3', name: 'Interview', type: 'mic',   color: defaultColors[2], volume: 1,   pan: 0, muted: false, soloed: false, armed: false, clips: [] },
-    { id: '4', name: 'Music Bed', type: 'music', color: defaultColors[3], volume: 0.8, pan: 0, muted: false, soloed: false, armed: false, clips: [] },
-  ];
-}
-
 const StudioContext = createContext<StudioContextType | null>(null);
 
 export function StudioProvider({ children }: { children: React.ReactNode }) {
-  const [tracks, setTracks] = useState<Track[]>(makeDefaultTracks);
+  const [tracks, setTracks] = useState<Track[]>([]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [playheadPosition, setPlayheadPosition] = useState(0);
@@ -75,8 +89,12 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
   const [inputGainLevel, setInputGainLevelState] = useState(0.8);
   const [zoom, setZoom] = useState(50);
   const [mixerOpen, setMixerOpen] = useState(true);
+  const [mixerDocked, setMixerDocked] = useState(true);
   const [inputDevices, setInputDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedInputId, setSelectedInputId] = useState('');
+  const [audioSetupDone, setAudioSetupDoneState] = useState(() => {
+    try { return localStorage.getItem('podcraft_audio_setup') === 'done'; } catch { return false; }
+  });
 
   const timerRef = useRef<number | null>(null);
   const lastTimeRef = useRef(0);
@@ -94,6 +112,11 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     if (selectedInputId) engine.requestInput(selectedInputId);
   }, [selectedInputId]);
 
+  const setAudioSetupDone = (done: boolean) => {
+    setAudioSetupDoneState(done);
+    if (done) localStorage.setItem('podcraft_audio_setup', 'done');
+  };
+
   const addTrack = (type: TrackType, name?: string) => {
     if (tracks.length >= 32) return;
     setTracks((prev) => [
@@ -105,6 +128,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         color: trackPalette[prev.length % trackPalette.length],
         volume: 1, pan: 0, muted: false, soloed: false,
         armed: type === 'mic',
+        preset: 'Custom',
         clips: [],
       },
     ]);
@@ -122,6 +146,16 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
   };
 
   const deleteTrack = (id: string) => setTracks((prev) => prev.filter((t) => t.id !== id));
+
+  const applyTrackPreset = (trackId: string, presetName: string) => {
+    const p = TRACK_PRESETS[presetName];
+    if (!p) return;
+    engine.setTrackEQ(trackId, 'low', p.eq.low);
+    engine.setTrackEQ(trackId, 'mid', p.eq.mid);
+    engine.setTrackEQ(trackId, 'high', p.eq.high);
+    engine.setTrackCompressor(trackId, p.compressor.enabled, p.compressor.threshold, p.compressor.ratio);
+    updateTrack(trackId, { volume: p.gain, preset: presetName });
+  };
 
   const tick = useCallback(() => {
     const now = performance.now();
@@ -164,7 +198,6 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     } else {
       const armedTracks = tracks.filter((t) => t.armed);
       if (armedTracks.length === 0) { alert('Please arm at least one track to record.'); return; }
-      // ensure mic input is initialized
       if (!engine.stream) await engine.requestInput(selectedInputId || undefined);
       const started = engine.startRecording(() => {});
       if (started) {
@@ -183,7 +216,6 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     setPlayheadPosition(0);
     engine.stop();
     stopTimer();
-    // also stop any active MediaRecorder
     if (engine.mediaRecorder && engine.mediaRecorder.state !== 'inactive') {
       engine.mediaRecorder.stop();
     }
@@ -201,7 +233,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <StudioContext.Provider value={{
-      tracks, addTrack, updateTrack, deleteTrack,
+      tracks, addTrack, updateTrack, deleteTrack, applyTrackPreset,
       isPlaying, isRecording, playheadPosition, setPlayheadPosition,
       togglePlay, toggleRecord, stop,
       masterVolume, setMasterVolume,
@@ -209,6 +241,8 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
       zoom, setZoom,
       inputDevices, selectedInputId, setSelectedInputId,
       mixerOpen, setMixerOpen,
+      mixerDocked, setMixerDocked,
+      audioSetupDone, setAudioSetupDone,
     }}>
       {children}
     </StudioContext.Provider>

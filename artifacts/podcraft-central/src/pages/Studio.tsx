@@ -5,17 +5,23 @@ import { useStudio } from '../store/StudioContext';
 import { StudioSidebar } from '../components/studio/StudioSidebar';
 import { StudioTopBar } from '../components/studio/StudioTopBar';
 import { StudioScriptPanel } from '../components/studio/StudioScriptPanel';
-import { StudioRecorder } from '../components/studio/StudioRecorder';
 import { StudioAIPanel } from '../components/studio/StudioAIPanel';
 import { StudioMixer } from '../components/studio/StudioMixer';
+import { AudioSetupModal } from '../components/studio/AudioSetupModal';
 
 function StudioPage() {
-  const { mixerOpen, setMixerOpen, isPlaying, isRecording, togglePlay, toggleRecord, stop, tracks } = useStudio();
-  const [scriptHeight, setScriptHeight] = useState(300);
-  const [aiWidth, setAiWidth] = useState(360);
-  const [aiCollapsed, setAiCollapsed] = useState(false);
+  const {
+    mixerOpen, setMixerOpen,
+    mixerDocked,
+    audioSetupDone,
+    isPlaying, isRecording, togglePlay, toggleRecord, stop, tracks,
+  } = useStudio();
 
-  // Vertical resizer — Script panel height
+  const [scriptHeight, setScriptHeight] = useState(300);
+  const [aiWidth,      setAiWidth]      = useState(360);
+  const [aiCollapsed,  setAiCollapsed]  = useState(false);
+
+  /* Vertical resizer — Script panel height (only active when docked) */
   const scriptDragRef = useRef<{ active: boolean; startY: number; startH: number }>({ active: false, startY: 0, startH: 0 });
   const handleScriptResizeDown = (e: React.PointerEvent) => {
     e.preventDefault();
@@ -24,7 +30,7 @@ function StudioPage() {
   useEffect(() => {
     const onMove = (e: PointerEvent) => {
       if (!scriptDragRef.current.active) return;
-      setScriptHeight(Math.max(120, Math.min(700, scriptDragRef.current.startH + e.clientY - scriptDragRef.current.startY)));
+      setScriptHeight(Math.max(120, Math.min(600, scriptDragRef.current.startH + e.clientY - scriptDragRef.current.startY)));
     };
     const onUp = () => { scriptDragRef.current.active = false; };
     window.addEventListener('pointermove', onMove);
@@ -32,7 +38,7 @@ function StudioPage() {
     return () => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); };
   }, []);
 
-  // Horizontal resizer — AI panel width
+  /* Horizontal resizer — AI panel width */
   const aiDragRef = useRef<{ active: boolean; startX: number; startW: number }>({ active: false, startX: 0, startW: 0 });
   const handleAiResizeDown = (e: React.PointerEvent) => {
     e.preventDefault();
@@ -59,19 +65,26 @@ function StudioPage() {
         <StudioTopBar />
 
         <div className="flex-1 flex overflow-hidden min-h-0">
-          {/* Center column */}
-          <div className="flex-1 flex flex-col min-w-0 overflow-y-auto p-4 gap-0">
-            <StudioScriptPanel height={scriptHeight} />
+          {/* Center column — pb-16 for fixed transport bar */}
+          <div className="flex-1 flex flex-col min-w-0 overflow-y-auto p-4 gap-0 pb-16">
 
-            {/* Vertical resize handle */}
-            <div
-              onPointerDown={handleScriptResizeDown}
-              className="h-2 my-1 flex items-center justify-center cursor-row-resize group flex-shrink-0"
-              style={{ touchAction: 'none' }}>
-              <div className="w-12 h-1 bg-gray-300 rounded-full group-hover:bg-violet-500 transition-colors" />
+            {/* Script panel — fixed height when docked, fills remaining space when floating */}
+            <div style={{ height: mixerDocked ? scriptHeight : undefined, flex: mixerDocked ? undefined : '1 1 auto', minHeight: 120 }}>
+              <StudioScriptPanel height={mixerDocked ? scriptHeight : undefined} />
             </div>
 
-            <StudioRecorder />
+            {/* Resize handle — only visible when docked */}
+            {mixerDocked && (
+              <div
+                onPointerDown={handleScriptResizeDown}
+                className="h-2 my-1 flex items-center justify-center cursor-row-resize group flex-shrink-0"
+                style={{ touchAction: 'none' }}>
+                <div className="w-12 h-1 bg-gray-300 rounded-full group-hover:bg-violet-500 transition-colors" />
+              </div>
+            )}
+
+            {/* Mixer renders here — when docked it is a block element; when floating it is position:fixed */}
+            <StudioMixer />
           </div>
 
           {/* AI panel resize handle */}
@@ -84,24 +97,24 @@ function StudioPage() {
 
           <StudioAIPanel width={aiWidth} collapsed={aiCollapsed} onToggleCollapsed={toggleAiCollapsed} />
         </div>
-
       </div>
 
-      <StudioMixer />
-
-      {/* ── Fixed Transport Bar — always visible, never moves ──── */}
+      {/* ── Fixed Transport Bar — never moves ──────────────────────── */}
       <div className="fixed bottom-0 left-0 right-0 z-[80] h-16 bg-white border-t border-gray-200 shadow-lg flex items-center justify-between px-6">
-        {/* Left: mixer toggle */}
-        <button
-          onClick={() => setMixerOpen(!mixerOpen)}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl border text-sm font-semibold transition-all ${
-            mixerOpen
-              ? 'border-violet-400 bg-violet-100 text-violet-700'
-              : 'border-gray-200 bg-gray-50 text-gray-600 hover:bg-gray-100'
-          }`}>
-          <Sliders className="w-4 h-4" />
-          {mixerOpen ? 'Hide Mixer' : 'Open Mixer'}
-        </button>
+        {/* Left: mixer toggle (only shown when floating) */}
+        {!mixerDocked && (
+          <button
+            onClick={() => setMixerOpen(!mixerOpen)}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl border text-sm font-semibold transition-all ${
+              mixerOpen
+                ? 'border-violet-400 bg-violet-100 text-violet-700'
+                : 'border-gray-200 bg-gray-50 text-gray-600 hover:bg-gray-100'
+            }`}>
+            <Sliders className="w-4 h-4" />
+            {mixerOpen ? 'Hide Mixer' : 'Open Mixer'}
+          </button>
+        )}
+        {mixerDocked && <div className="min-w-[120px]" />}
 
         {/* Center: transport controls */}
         <div className="flex items-center gap-2">
@@ -139,6 +152,9 @@ function StudioPage() {
             : <span className="text-gray-400">No tracks armed</span>}
         </div>
       </div>
+
+      {/* Audio Setup modal — shown on first entry */}
+      {!audioSetupDone && <AudioSetupModal />}
     </div>
   );
 }

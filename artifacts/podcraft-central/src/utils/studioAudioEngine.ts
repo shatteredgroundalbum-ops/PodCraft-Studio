@@ -63,9 +63,11 @@ export class AudioEngine {
   recorderDestination: MediaStreamAudioDestinationNode | null = null;
 
   // ── Timeline track chains ─────────────────────────────────────
-  trackGains:     Map<string, GainNode>         = new Map();
-  trackPanners:   Map<string, StereoPannerNode> = new Map();
-  trackAnalysers: Map<string, AnalyserNode>     = new Map();
+  trackGains:       Map<string, GainNode>              = new Map();
+  trackEQs:         Map<string, ChannelEQ>             = new Map();
+  trackCompressors: Map<string, DynamicsCompressorNode>= new Map();
+  trackPanners:     Map<string, StereoPannerNode>      = new Map();
+  trackAnalysers:   Map<string, AnalyserNode>          = new Map();
 
   // ── Mic MediaRecorder (for timeline clips) ────────────────────
   mediaRecorder:  MediaRecorder | null = null;
@@ -210,19 +212,46 @@ export class AudioEngine {
   }
 
   // ── Timeline track chain ────────────────────────────────────
+  // Chain: gain → EQ (low→mid→high) → compressor → panner → analyser → master
   getTrackGain(trackId: string): GainNode | undefined {
     if (!this.ctx || !this.masterGain) return undefined;
     if (!this.trackGains.has(trackId)) {
-      const gain    = this.ctx.createGain();
-      const panner  = this.ctx.createStereoPanner();
+      const gain     = this.ctx.createGain();
+      const eq       = this._makeEQ();
+      const comp     = this.ctx.createDynamicsCompressor();
+      comp.threshold.value = 0; comp.ratio.value = 1; // neutral — bypass
+      const panner   = this.ctx.createStereoPanner();
       const analyser = this.ctx.createAnalyser();
       analyser.fftSize = 256;
-      gain.connect(panner); panner.connect(analyser); analyser.connect(this.masterGain);
+      gain.connect(eq.low);
+      eq.low.connect(eq.mid);
+      eq.mid.connect(eq.high);
+      eq.high.connect(comp);
+      comp.connect(panner);
+      panner.connect(analyser);
+      analyser.connect(this.masterGain);
       this.trackGains.set(trackId, gain);
+      this.trackEQs.set(trackId, eq);
+      this.trackCompressors.set(trackId, comp);
       this.trackPanners.set(trackId, panner);
       this.trackAnalysers.set(trackId, analyser);
     }
     return this.trackGains.get(trackId);
+  }
+
+  setTrackEQ(trackId: string, band: 'low'|'mid'|'high', db: number) {
+    const eq = this.trackEQs.get(trackId);
+    if (eq) eq[band].gain.value = db;
+    else { this.getTrackGain(trackId); const eq2 = this.trackEQs.get(trackId); if (eq2) eq2[band].gain.value = db; }
+  }
+
+  setTrackCompressor(trackId: string, enabled: boolean, threshold = -18, ratio = 3) {
+    const comp = this.trackCompressors.get(trackId);
+    if (!comp) return;
+    comp.threshold.value = enabled ? threshold : 0;
+    comp.ratio.value     = enabled ? ratio     : 1;
+    comp.attack.value    = enabled ? 0.003     : 0;
+    comp.release.value   = enabled ? 0.25      : 0.25;
   }
 
   getTrackAnalyser(trackId: string): AnalyserNode | undefined {
