@@ -1,2 +1,1 @@
-- [AI Producer pipeline](ai-producer-pipeline.md) — 8-stage pipeline, all services in stages/, qualityScorecardService at services/ai root; ApprovalGate required before distribution actions
-- [Studio mixer architecture](studio-arch.md) — dock/float mode, engine routing, available vs unavailable effects, preset system, AudioSetupModal on first entry
+- [Studio effects wiring](studio-effects.md) — all 6 effects pads are wired; Gate/Limiter use RMS-RAF + DynamicsCompressor patterns

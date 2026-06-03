@@ -96,6 +96,8 @@ export function StudioMixer() {
   const [compEnabled,    setCompEnabled]     = useState(() => bln(S.compEnabled,    false));
   const [reverbEnabled,  setReverbEnabled]   = useState(() => bln(S.reverbEnabled,  false));
   const [delayEnabled,   setDelayEnabled]    = useState(() => bln(S.delayEnabled,   false));
+  const [gateEnabled,    setGateEnabled]     = useState(() => bln(S.gateEnabled,    false));
+  const [limiterEnabled, setLimiterEnabled]  = useState(() => bln(S.limiterEnabled, false));
 
   /* Pad state */
   const [pads,       setPads]       = useState<PadData[]>(makePads);
@@ -127,6 +129,8 @@ export function StudioMixer() {
     engine.setCompressor(compEnabled);
     engine.setReverbEnabled(reverbEnabled);
     engine.setDelayEnabled(delayEnabled);
+    engine.setLimiterEnabled(limiterEnabled);
+    if (gateEnabled) engine.setNoiseGateEnabled(true);
     if (masterMuted) engine.setMasterVolume(0); else engine.setMasterVolume(masterVolume);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -137,10 +141,10 @@ export function StudioMixer() {
       micTrim, micGainVal, micPan, micEQ,
       musicBedVol, musicBedPan, musicBedMuted, duckEnabled,
       sfxVol, sfxPan, sfxMuted, monitorVol, masterMuted, compEnabled,
-      reverbEnabled, delayEnabled,
+      reverbEnabled, delayEnabled, gateEnabled, limiterEnabled,
     })), 700);
     return () => clearTimeout(t);
-  }, [micTrim, micGainVal, micPan, micEQ, musicBedVol, musicBedPan, musicBedMuted, duckEnabled, sfxVol, sfxPan, sfxMuted, monitorVol, masterMuted, compEnabled, reverbEnabled, delayEnabled]);
+  }, [micTrim, micGainVal, micPan, micEQ, musicBedVol, musicBedPan, musicBedMuted, duckEnabled, sfxVol, sfxPan, sfxMuted, monitorVol, masterMuted, compEnabled, reverbEnabled, delayEnabled, gateEnabled, limiterEnabled]);
 
   /* ── Duck loop ──────────────────────────────────────────────── */
   useEffect(() => {
@@ -183,6 +187,8 @@ export function StudioMixer() {
     duck:         ()          => setDuckEnabled(d=>!d),
     reverb:       ()          => { const e=!reverbEnabled; setReverbEnabled(e); engine.setReverbEnabled(e); },
     delay:        ()          => { const e=!delayEnabled;  setDelayEnabled(e);  engine.setDelayEnabled(e); },
+    gate:         ()          => { const e=!gateEnabled;   setGateEnabled(e);   engine.setNoiseGateEnabled(e); },
+    limiter:      ()          => { const e=!limiterEnabled; setLimiterEnabled(e); engine.setLimiterEnabled(e); },
   };
 
   /* ── Add Track ──────────────────────────────────────────────── */
@@ -225,12 +231,12 @@ export function StudioMixer() {
 
   /* ── Effects pad definitions ────────────────────────────────── */
   const effectPads = [
-    { id: 0, label: 'Reverb',     available: true,  active: reverbEnabled,  onToggle: h.reverb,  desc: 'Synthetic room reverb on mic (ConvolverNode)' },
-    { id: 1, label: 'Delay',      available: true,  active: delayEnabled,   onToggle: h.delay,   desc: '120ms delay on mic (DelayNode)' },
-    { id: 2, label: 'Compressor', available: true,  active: compEnabled,    onToggle: h.comp,    desc: 'Master bus compressor (DynamicsCompressorNode)' },
-    { id: 3, label: 'Noise Gate', available: false, active: false,          onToggle: ()=>{},    desc: 'Unavailable — requires AudioWorklet (not implemented in Web Audio API)' },
-    { id: 4, label: 'Ducking',    available: true,  active: duckEnabled,    onToggle: h.duck,    desc: 'Auto-duck music when voice detected (RAF loop)' },
-    { id: 5, label: 'Limiter',    available: false, active: false,          onToggle: ()=>{},    desc: 'Unavailable — no native LimiterNode in Web Audio API' },
+    { id: 0, label: 'Reverb',     available: true, active: reverbEnabled,   onToggle: h.reverb,  desc: 'Synthetic room reverb on mic channel (ConvolverNode)' },
+    { id: 1, label: 'Delay',      available: true, active: delayEnabled,    onToggle: h.delay,   desc: '120 ms delay on mic channel (DelayNode)' },
+    { id: 2, label: 'Compressor', available: true, active: compEnabled,     onToggle: h.comp,    desc: 'Master bus compressor — 4:1 ratio, -24 dB threshold' },
+    { id: 3, label: 'Noise Gate', available: true, active: gateEnabled,     onToggle: h.gate,    desc: 'Mic noise gate — opens above -40 dB RMS, closes below' },
+    { id: 4, label: 'Ducking',    available: true, active: duckEnabled,     onToggle: h.duck,    desc: 'Auto-duck music when voice detected (RAF envelope)' },
+    { id: 5, label: 'Limiter',    available: true, active: limiterEnabled,  onToggle: h.limiter, desc: 'Master brick-wall limiter — -1 dBFS ceiling, 20:1 ratio' },
   ];
 
   /* ── Mic tracks only in strip ───────────────────────────────── */
@@ -294,11 +300,12 @@ export function StudioMixer() {
               <div className="my-1 border-t border-gray-100"/>
               <div className="px-3 py-1.5 text-[10px] text-gray-400 font-semibold uppercase tracking-wide">Engine Status</div>
               <div className="px-3 pb-2 text-[10px] text-gray-500 leading-relaxed">
-                Reverb: {reverbEnabled ? '✓ On' : 'Off'}<br/>
-                Delay: {delayEnabled ? '✓ On' : 'Off'}<br/>
-                Compressor: {compEnabled ? '✓ On' : 'Off'}<br/>
-                Noise Gate: <span className="text-red-400">Unavailable</span><br/>
-                Limiter: <span className="text-red-400">Unavailable</span>
+                Reverb: {reverbEnabled ? <span className="text-green-600">✓ On</span> : 'Off'}<br/>
+                Delay: {delayEnabled ? <span className="text-green-600">✓ On</span> : 'Off'}<br/>
+                Compressor: {compEnabled ? <span className="text-green-600">✓ On</span> : 'Off'}<br/>
+                Noise Gate: {gateEnabled ? <span className="text-green-600">✓ On</span> : 'Off'}<br/>
+                Ducking: {duckEnabled ? <span className="text-green-600">✓ On</span> : 'Off'}<br/>
+                Limiter: {limiterEnabled ? <span className="text-green-600">✓ On</span> : 'Off'}
               </div>
             </div>
           )}

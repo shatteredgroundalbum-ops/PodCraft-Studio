@@ -1,10 +1,10 @@
 /* ── PodCraft Audio Engine — Full DAW Mixer Routing ──────────────
    Signal flow:
-   Mic → inputGain(trim) → inputAnalyser → micEQ → micGain(fader) → micPanner → micAnalyser → masterGain
+   Mic → inputGain(trim) → inputAnalyser → gateGain → micEQ → micGain(fader) → micPanner → micAnalyser → masterGain
    Timeline clips → trackGain → trackPanner → trackAnalyser → masterGain
    Music Pads → musicBusGain(fader) → musicBusEQ → musicBusPanner → musicBusAnalyser → masterGain
    SFX Pads → sfxBusGain(fader) → sfxBusEQ → sfxBusPanner → sfxBusAnalyser → masterGain
-   masterGain → masterCompressor → masterAnalyser → destination
+   masterGain → masterCompressor → masterLimiter → masterAnalyser → destination
              └→ monitorGain → monitorAnalyser  (headphone monitor)
              └→ recorderBusGain → recorderDestination  (master-mix export)
    ─────────────────────────────────────────────────────────────── */
@@ -43,6 +43,14 @@ export class AudioEngine {
   sfxBusEQ:       ChannelEQ | null = null;
   sfxBusPanner:   StereoPannerNode | null = null;
   sfxBusAnalyser: AnalyserNode | null = null;
+
+  // ── Noise Gate (mic chain, between inputAnalyser and micEQ) ──
+  gateGain:  GainNode | null = null;
+  private _gateRaf = 0;
+  private _gateEnabled = false;
+
+  // ── Master Limiter (after masterCompressor, before masterAnalyser)
+  masterLimiter: DynamicsCompressorNode | null = null;
 
   // ── Reverb effect (parallel wet send from mic post-fader) ─────
   reverbSendGain:   GainNode | null = null;
@@ -94,8 +102,16 @@ export class AudioEngine {
     this.masterCompressor.ratio.value = 1;
     this.masterAnalyser = this.ctx.createAnalyser();
     this.masterAnalyser.fftSize = 1024;
+    // Master limiter (brick-wall, bypassed by default until enabled)
+    this.masterLimiter = this.ctx.createDynamicsCompressor();
+    this.masterLimiter.threshold.value = 0;   // 0 dBFS = no limiting in bypass
+    this.masterLimiter.ratio.value     = 1;   // 1:1 = bypass
+    this.masterLimiter.attack.value    = 0.001;
+    this.masterLimiter.release.value   = 0.05;
+    this.masterLimiter.knee.value      = 0;
     this.masterGain.connect(this.masterCompressor);
-    this.masterCompressor.connect(this.masterAnalyser);
+    this.masterCompressor.connect(this.masterLimiter);
+    this.masterLimiter.connect(this.masterAnalyser);
     this.masterAnalyser.connect(this.ctx.destination);
 
     // Reverb effect (ConvolverNode — parallel wet send, input wired in requestInput)
@@ -192,9 +208,13 @@ export class AudioEngine {
         this.micPanner = this.ctx.createStereoPanner();
         this.micAnalyser = this.ctx.createAnalyser();
         this.micAnalyser.fftSize = 1024;
+        // Noise gate node (sits between inputAnalyser and micEQ; gain=1 = pass-through)
+        this.gateGain = this.ctx.createGain();
+        this.gateGain.gain.value = 1;
         source.connect(this.inputGainNode);
         this.inputGainNode.connect(this.inputAnalyser);
-        this.inputAnalyser.connect(this.micEQ.low);
+        this.inputAnalyser.connect(this.gateGain);
+        this.gateGain.connect(this.micEQ.low);
         this.micEQ.low.connect(this.micEQ.mid);
         this.micEQ.mid.connect(this.micEQ.high);
         this.micEQ.high.connect(this.micGain);
@@ -280,6 +300,49 @@ export class AudioEngine {
     if (!this.masterCompressor) return;
     this.masterCompressor.threshold.value = enabled ? -24 : 0;
     this.masterCompressor.ratio.value     = enabled ? 4   : 1;
+  }
+
+  // ── Limiter (DynamicsCompressor in hard brick-wall mode) ─────
+  setLimiterEnabled(enabled: boolean): void {
+    if (!this.masterLimiter) return;
+    if (enabled) {
+      this.masterLimiter.threshold.value = -1;   // -1 dBFS ceiling
+      this.masterLimiter.ratio.value     = 20;   // 20:1 ≈ brick-wall
+      this.masterLimiter.attack.value    = 0.001; // 1 ms attack
+      this.masterLimiter.release.value   = 0.05;  // 50 ms release
+      this.masterLimiter.knee.value      = 0;     // hard knee
+    } else {
+      this.masterLimiter.threshold.value = 0;    // above 0 dBFS = no limiting
+      this.masterLimiter.ratio.value     = 1;    // 1:1 = transparent bypass
+    }
+  }
+
+  // ── Noise Gate (RMS envelope follower via RAF — same pattern as Ducking) ─
+  setNoiseGateEnabled(enabled: boolean, thresholdDb = -40): void {
+    this._gateEnabled = enabled;
+    cancelAnimationFrame(this._gateRaf);
+
+    if (!enabled) {
+      // Open gate fully on disable (smooth 10 ms ramp to avoid click)
+      if (this.gateGain && this.ctx)
+        this.gateGain.gain.setTargetAtTime(1, this.ctx.currentTime, 0.01);
+      return;
+    }
+
+    const threshold = Math.pow(10, thresholdDb / 20); // dB → linear amplitude
+    const loop = () => {
+      this._gateRaf = requestAnimationFrame(loop);
+      if (!this._gateEnabled || !this.inputAnalyser || !this.gateGain || !this.ctx) return;
+      const buf = new Float32Array(this.inputAnalyser.fftSize);
+      this.inputAnalyser.getFloatTimeDomainData(buf);
+      let sq = 0;
+      for (let i = 0; i < buf.length; i++) sq += buf[i] * buf[i];
+      const rms = Math.sqrt(sq / buf.length);
+      const target = rms > threshold ? 1 : 0;
+      // 10 ms smooth transition prevents audible clicks
+      this.gateGain.gain.setTargetAtTime(target, this.ctx.currentTime, 0.01);
+    };
+    this._gateRaf = requestAnimationFrame(loop);
   }
 
   setMicEQ     (band: 'low'|'mid'|'high', db: number) { if (this.micEQ)      this.micEQ[band].gain.value = db; }
