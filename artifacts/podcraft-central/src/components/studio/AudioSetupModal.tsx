@@ -29,7 +29,7 @@ const ROOM_PROFILES: Record<string, ProfileBase> = {
   'Custom / Unknown':           { eq:{low: 0,mid:0,high:0},  gain:0.80, gateEnabled:false, gateThresholdDb:-40, compEnabled:false, limiterEnabled:false, recommendedPreset:'Custom'                },
 };
 
-/* ─── Room classification from measurements ──────────────────── */
+/* ─── Room classification (primary + alternates) ─────────────── */
 function classifyRoom(noiseFloorDb: number, reverbMs: number, spectralLow: number, spectralHigh: number): string {
   if (noiseFloorDb > -22) return 'Noisy Environment';
   if (reverbMs > 550) {
@@ -50,6 +50,32 @@ function classifyRoom(noiseFloorDb: number, reverbMs: number, spectralLow: numbe
     return 'Bedroom';
   }
   return 'Treated Room';
+}
+
+const ROOM_SECONDARY: Record<string, [string, string]> = {
+  'Treated Room':               ['Bedroom',                    'Office'              ],
+  'Bedroom':                    ['Office',                     'Living Room'         ],
+  'Office':                     ['Bedroom',                    'Living Room'         ],
+  'Living Room':                ['Bedroom',                    'Kitchen'             ],
+  'Kitchen':                    ['Living Room',                'Office'              ],
+  'Hallway':                    ['Bathroom / Reflective Room', 'Garage'              ],
+  'Bathroom / Reflective Room': ['Hallway',                    'Kitchen'             ],
+  'Garage':                     ['Warehouse',                  'Hallway'             ],
+  'Warehouse':                  ['Garage',                     'Hallway'             ],
+  'Vehicle':                    ['Van',                        'Noisy Environment'   ],
+  'Semi-truck':                 ['Van',                        'Vehicle'             ],
+  'Van':                        ['Vehicle',                    'Semi-truck'          ],
+  'Noisy Environment':          ['Vehicle',                    'Garage'              ],
+  'Custom / Unknown':           ['Bedroom',                    'Office'              ],
+};
+
+function classifyRoomTop3(
+  noiseFloorDb: number, reverbMs: number,
+  spectralLow: number, spectralHigh: number,
+): [string, string, string] {
+  const primary = classifyRoom(noiseFloorDb, reverbMs, spectralLow, spectralHigh);
+  const [second, third] = ROOM_SECONDARY[primary] ?? ['Bedroom', 'Office'];
+  return [primary, second, third];
 }
 
 /* ─── Select options ─────────────────────────────────────────── */
@@ -80,6 +106,7 @@ type TestPhase = 'idle' | 'requesting' | 'noise' | 'voice' | 'analyzing' | 'done
 
 interface RoomMeasurements {
   noiseFloorDb: number;
+  peakInputDb: number;
   reverbMs: number;
   spectralLow: number;
   spectralMid: number;
@@ -90,6 +117,10 @@ interface RoomMeasurements {
 const NOISE_DURATION_MS  = 4000;
 const VOICE_DURATION_MS  = 6000;
 const SAMPLE_INTERVAL_MS = 50;
+
+/* ─── Persistent storage key ─────────────────────────────────── */
+const LAST_PROFILE_KEY    = 'podcraft_last_room_profile_v2';
+const PROFILE_HISTORY_KEY = 'podcraft_room_profile_history';
 
 /* ─── Main component ─────────────────────────────────────────── */
 export function AudioSetupModal() {
@@ -103,10 +134,12 @@ export function AudioSetupModal() {
 
   /* Room test state */
   const [testPhase,     setTestPhase]     = useState<TestPhase>('idle');
-  const [testProgress,  setTestProgress]  = useState(0);       // 0-100
-  const [currentRmsDb,  setCurrentRmsDb]  = useState(-90);     // live meter
+  const [testProgress,  setTestProgress]  = useState(0);
+  const [currentRmsDb,  setCurrentRmsDb]  = useState(-90);
   const [measurements,  setMeasurements]  = useState<RoomMeasurements | null>(null);
+  const [roomGuesses,   setRoomGuesses]   = useState<[string, string, string]>(['Bedroom', 'Office', 'Living Room']);
   const [overrideRoom,  setOverrideRoom]  = useState('');
+  const [customRoomName, setCustomRoomName] = useState('');
   const [testError,     setTestError]     = useState('');
 
   const streamRef   = useRef<MediaStream | null>(null);
@@ -116,7 +149,6 @@ export function AudioSetupModal() {
 
   useEffect(() => { engine.init(); }, []);
 
-  /* Clean up on unmount */
   useEffect(() => () => { cancelRef.current = true; cleanupTestAudio(); }, []);
 
   const cleanupTestAudio = () => {
@@ -135,10 +167,11 @@ export function AudioSetupModal() {
     setTestPhase('requesting');
     setTestProgress(0);
 
-    /* Request mic access */
     let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      });
     } catch {
       setTestPhase('error');
       setTestError('Microphone access denied. Please allow microphone permission and try again.');
@@ -168,7 +201,7 @@ export function AudioSetupModal() {
 
     const sleep = (ms: number) => new Promise<void>(res => setTimeout(res, ms));
 
-    /* ── Phase 1: Noise floor (4 seconds silence) ── */
+    /* Phase 1: Noise floor — 4 seconds of silence */
     setTestPhase('noise');
     const noiseSamples: number[] = [];
     const noiseSteps = Math.floor(NOISE_DURATION_MS / SAMPLE_INTERVAL_MS);
@@ -181,18 +214,16 @@ export function AudioSetupModal() {
       setTestProgress(Math.round((i / noiseSteps) * 50));
       await sleep(SAMPLE_INTERVAL_MS);
     }
-    /* 10th-percentile RMS = noise floor (excludes any transient spikes) */
     const sorted = [...noiseSamples].sort((a, b) => a - b);
     const noiseFloorRms = sorted[Math.max(0, Math.floor(sorted.length * 0.1))];
     const noiseFloorDb  = noiseFloorRms > 0 ? 20 * Math.log10(Math.max(noiseFloorRms, 1e-10)) : -90;
 
-    /* ── Phase 2: Voice + decay (6 seconds) ── */
+    /* Phase 2: Voice + decay — 6 seconds */
     setTestPhase('voice');
     const voiceSamples: number[] = [];
     const voiceSteps = Math.floor(VOICE_DURATION_MS / SAMPLE_INTERVAL_MS);
     let peakRms = 0;
     let peakIdx = 0;
-    /* Capture FFT mid-way through voice phase for spectral balance */
     let capturedFreqBuf: Uint8Array | null = null;
 
     for (let i = 0; i < voiceSteps; i++) {
@@ -203,7 +234,6 @@ export function AudioSetupModal() {
       const dbVal = rms > 0 ? 20 * Math.log10(Math.max(rms, 1e-10)) : -90;
       setCurrentRmsDb(dbVal);
       setTestProgress(50 + Math.round((i / voiceSteps) * 45));
-      /* Capture FFT at the peak or just before */
       if (rms === peakRms && !capturedFreqBuf) {
         analyser.getByteFrequencyData(freqBuf);
         capturedFreqBuf = new Uint8Array(freqBuf);
@@ -211,12 +241,13 @@ export function AudioSetupModal() {
       await sleep(SAMPLE_INTERVAL_MS);
     }
 
-    /* ── Phase 3: Analyze ── */
+    /* Phase 3: Analyze */
     setTestPhase('analyzing');
     setTestProgress(95);
     await sleep(300);
 
-    /* Reverb estimate: count samples above (noiseFloor * 5) AFTER peak */
+    const peakInputDb = peakRms > 0 ? 20 * Math.log10(Math.max(peakRms, 1e-10)) : -90;
+
     const decayThresholdRms = noiseFloorRms * 6;
     let decaySampleCount = 0;
     for (let i = peakIdx + 1; i < voiceSamples.length; i++) {
@@ -225,7 +256,6 @@ export function AudioSetupModal() {
     }
     const reverbMs = Math.min(decaySampleCount * SAMPLE_INTERVAL_MS, 800);
 
-    /* Spectral balance from captured FFT (or last reading) */
     const fft = capturedFreqBuf ?? freqBuf;
     analyser.getByteFrequencyData(freqBuf);
     const sampleRate = actx.sampleRate;
@@ -241,28 +271,74 @@ export function AudioSetupModal() {
     const spectralMid  = Math.round((midSum  / total) * 100);
     const spectralHigh = Math.round((highSum / total) * 100);
 
-    const detectedRoom = classifyRoom(noiseFloorDb, reverbMs, spectralLow, spectralHigh);
+    const guesses = classifyRoomTop3(noiseFloorDb, reverbMs, spectralLow, spectralHigh);
 
     cleanupTestAudio();
     setTestProgress(100);
 
-    const result: RoomMeasurements = { noiseFloorDb, reverbMs, spectralLow, spectralMid, spectralHigh, detectedRoom };
+    const result: RoomMeasurements = {
+      noiseFloorDb, peakInputDb, reverbMs,
+      spectralLow, spectralMid, spectralHigh,
+      detectedRoom: guesses[0],
+    };
     setMeasurements(result);
-    setOverrideRoom(detectedRoom);
+    setRoomGuesses(guesses);
+    setOverrideRoom(guesses[0]);
     setTestPhase('done');
   };
 
-  /* ── Finish: apply room profile and close ──────────────────── */
+  /* ── Finish: apply room profile + persist + close ──────────── */
   const handleFinish = () => {
+    const isCustom = overrideRoom === 'Custom / Unknown';
     const chosenRoom = overrideRoom || measurements?.detectedRoom || 'Custom / Unknown';
     const base = ROOM_PROFILES[chosenRoom] ?? ROOM_PROFILES['Custom / Unknown'];
+
+    const roomLabel = isCustom && customRoomName.trim()
+      ? customRoomName.trim()
+      : chosenRoom;
+
     const profile: RoomProfileSettings = {
-      roomType:          chosenRoom,
-      noiseFloorDb:      measurements?.noiseFloorDb ?? -60,
-      reverbMs:          measurements?.reverbMs ?? 0,
+      roomType:     roomLabel,
+      noiseFloorDb: measurements?.noiseFloorDb ?? -60,
+      reverbMs:     measurements?.reverbMs     ?? 0,
       ...base,
     };
     applyRoomProfile(profile);
+
+    /* Store rich profile for Resume Session + future reference */
+    const richProfile = {
+      id:           Date.now().toString(),
+      timestamp:    new Date().toISOString(),
+      roomType:     roomLabel,
+      customRoomName: isCustom ? customRoomName.trim() || undefined : undefined,
+      audioInterface: iface,
+      microphone:   mic,
+      monitoring:   phones,
+      measurements: measurements
+        ? {
+            noiseFloorDb:  measurements.noiseFloorDb,
+            peakInputDb:   measurements.peakInputDb,
+            reverbMs:      measurements.reverbMs,
+            spectralLow:   measurements.spectralLow,
+            spectralMid:   measurements.spectralMid,
+            spectralHigh:  measurements.spectralHigh,
+          }
+        : null,
+      unsupportedMeasurements: [
+        'echoMs',             // echo/reflection: estimated via decay only, not directly measured
+        'backgroundHumDb',    // hum/noise frequency: not separately measured
+        'voiceClarity',       // no voice quality scoring implemented
+      ],
+      appliedSettings: { ...base },
+    };
+
+    try {
+      localStorage.setItem(LAST_PROFILE_KEY, JSON.stringify(richProfile));
+      const history: unknown[] = JSON.parse(localStorage.getItem(PROFILE_HISTORY_KEY) ?? '[]');
+      history.unshift(richProfile);
+      localStorage.setItem(PROFILE_HISTORY_KEY, JSON.stringify(history.slice(0, 20)));
+    } catch { /* ignore storage errors */ }
+
     setAudioSetupDone(true);
   };
 
@@ -271,11 +347,11 @@ export function AudioSetupModal() {
   const isLast  = step === 'confirm';
 
   const canNext =
-    step === 'interface'  ? !!iface
-    : step === 'mic'      ? !!mic
+    step === 'interface'    ? !!iface
+    : step === 'mic'        ? !!mic
     : step === 'headphones' ? !!phones
-    : step === 'roomtest' ? testPhase === 'done'
-    : true; /* confirm always ok */
+    : step === 'roomtest'   ? testPhase === 'done'
+    : true;
 
   const handleNext = () => {
     if (step === 'roomtest' && testPhase !== 'done') return;
@@ -306,7 +382,6 @@ export function AudioSetupModal() {
 
         {/* Body */}
         <div className="px-6 py-5 flex-1 overflow-y-auto">
-
           {step === 'interface' && (
             <StepSelect
               icon={<span className="text-xl">🎛️</span>} color="violet"
@@ -337,16 +412,15 @@ export function AudioSetupModal() {
               measurements={measurements} error={testError} onStart={runRoomTest}/>
           )}
 
-          {step === 'confirm' && measurements && (
+          {step === 'confirm' && (
             <ConfirmStep
-              measurements={measurements} overrideRoom={overrideRoom}
-              onOverride={setOverrideRoom}/>
-          )}
-
-          {step === 'confirm' && !measurements && (
-            <ConfirmStep
-              measurements={null} overrideRoom={overrideRoom || 'Custom / Unknown'}
-              onOverride={setOverrideRoom}/>
+              measurements={measurements ?? null}
+              overrideRoom={overrideRoom || (measurements?.detectedRoom ?? 'Custom / Unknown')}
+              onOverride={setOverrideRoom}
+              roomGuesses={roomGuesses}
+              customRoomName={customRoomName}
+              onCustomRoomName={setCustomRoomName}
+            />
           )}
         </div>
 
@@ -380,7 +454,7 @@ function StepSelect({ icon, color, title, description, options, value, onChange 
   icon: React.ReactNode; color: string; title: string; description: string;
   options: string[]; value: string; onChange: (v: string) => void;
 }) {
-  const bg: Record<string,string> = { violet:'bg-violet-100', red:'bg-red-100', blue:'bg-blue-100' };
+  const bg: Record<string, string> = { violet: 'bg-violet-100', red: 'bg-red-100', blue: 'bg-blue-100' };
   return (
     <div>
       <div className="flex items-center gap-3 mb-4">
@@ -403,7 +477,7 @@ function RoomTestStep({ phase, progress, rmsDb, measurements, error, onStart }: 
   phase: TestPhase; progress: number; rmsDb: number;
   measurements: RoomMeasurements | null; error: string; onStart: () => void;
 }) {
-  const meterPct = Math.max(0, Math.min(100, (rmsDb + 90) / 90 * 100));
+  const meterPct   = Math.max(0, Math.min(100, (rmsDb + 90) / 90 * 100));
   const meterColor = rmsDb > -12 ? 'bg-red-500' : rmsDb > -24 ? 'bg-yellow-400' : 'bg-green-500';
 
   return (
@@ -419,12 +493,18 @@ function RoomTestStep({ phase, progress, rmsDb, measurements, error, onStart }: 
       </div>
 
       {phase === 'idle' && (
-        <div className="text-center py-6">
-          <p className="text-sm text-gray-600 mb-1">We'll measure your recording space to recommend optimal settings.</p>
-          <p className="text-xs text-gray-400 mb-5">Takes about 10 seconds. Sit or stand in your normal recording position.</p>
+        <div className="text-center py-4">
+          <div className="bg-violet-50 border border-violet-200 rounded-xl px-4 py-4 mb-5 text-left">
+            <p className="text-sm text-violet-900 leading-relaxed">
+              Stand or sit in your normal recording position. Then speak at a normal volume.
+              If possible, also speak once from the middle of the room away from the microphone
+              so the system can listen to the room profile.
+            </p>
+          </div>
+          <p className="text-xs text-gray-400 mb-5">Takes about 10 seconds. The system will listen and estimate your room type.</p>
           <button onClick={onStart}
             className="px-6 py-2.5 bg-violet-600 text-white text-sm font-bold rounded-xl hover:bg-violet-700">
-            Start Room Test
+            Start Mic Check
           </button>
         </div>
       )}
@@ -438,32 +518,29 @@ function RoomTestStep({ phase, progress, rmsDb, measurements, error, onStart }: 
 
       {(phase === 'noise' || phase === 'voice') && (
         <div className="space-y-4">
-          {/* Phase label */}
           <div className={`rounded-xl px-4 py-3 text-sm font-medium ${phase === 'noise' ? 'bg-blue-50 text-blue-800 border border-blue-200' : 'bg-amber-50 text-amber-800 border border-amber-200'}`}>
             {phase === 'noise'
               ? '🔇  Remain completely silent for 4 seconds…'
-              : '🎙  Speak a phrase: "Testing, one two three, testing" — then remain silent.'}
+              : '🎙  Speak at a normal volume, then walk to the middle of the room and speak again.'}
           </div>
 
-          {/* Level meter */}
           <div>
             <div className="flex justify-between text-[10px] text-gray-400 mb-1">
               <span>Input level</span>
               <span>{rmsDb < -89 ? '—' : `${rmsDb.toFixed(1)} dBFS`}</span>
             </div>
             <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
-              <div className={`h-full rounded-full transition-all duration-75 ${meterColor}`} style={{width:`${meterPct}%`}}/>
+              <div className={`h-full rounded-full transition-all duration-75 ${meterColor}`} style={{ width: `${meterPct}%` }}/>
             </div>
           </div>
 
-          {/* Progress bar */}
           <div>
             <div className="flex justify-between text-[10px] text-gray-400 mb-1">
               <span>{phase === 'noise' ? 'Silence measurement' : 'Voice measurement'}</span>
               <span>{progress}%</span>
             </div>
             <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-              <div className="h-full bg-violet-500 rounded-full transition-all duration-100" style={{width:`${progress}%`}}/>
+              <div className="h-full bg-violet-500 rounded-full transition-all duration-100" style={{ width: `${progress}%` }}/>
             </div>
           </div>
         </div>
@@ -480,27 +557,38 @@ function RoomTestStep({ phase, progress, rmsDb, measurements, error, onStart }: 
         <div className="space-y-3">
           <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-3">
             <div className="text-sm font-semibold text-green-800 mb-0.5">✓ Analysis complete</div>
-            <div className="text-xs text-green-700">Detected: <span className="font-bold">{measurements.detectedRoom}</span></div>
+            <div className="text-xs text-green-700">Best guess: <span className="font-bold">{measurements.detectedRoom}</span></div>
           </div>
 
-          {/* Measurements grid */}
           <div className="grid grid-cols-2 gap-2">
-            <Metric label="Noise Floor" value={`${measurements.noiseFloorDb.toFixed(1)} dBFS`}
+            <Metric label="Noise Floor"   value={`${measurements.noiseFloorDb.toFixed(1)} dBFS`}
               note={measurements.noiseFloorDb > -30 ? 'High — gate recommended' : 'Good'}
               warn={measurements.noiseFloorDb > -30}/>
-            <Metric label="Reverb Est." value={`~${measurements.reverbMs} ms`}
+            <Metric label="Peak Input"    value={`${measurements.peakInputDb.toFixed(1)} dBFS`}
+              note="Measured during voice phase" warn={false}/>
+            <Metric label="Reverb Est."   value={`~${measurements.reverbMs} ms`}
               note="Estimated from speech decay" warn={false} approx/>
+            <Metric label="Echo / Hum"    value="Unavailable"
+              note="Not directly measurable in browser" warn={false} unavailable/>
           </div>
 
-          {/* Spectral bar */}
           <div className="bg-gray-50 rounded-xl p-3">
-            <div className="text-[10px] text-gray-500 font-semibold mb-2 uppercase tracking-wide">Spectral Balance (estimated)</div>
+            <div className="text-[10px] text-gray-500 font-semibold mb-2 uppercase tracking-wide">
+              Spectral Balance (estimated)
+            </div>
             <SpectralBar low={measurements.spectralLow} mid={measurements.spectralMid} high={measurements.spectralHigh}/>
+          </div>
+
+          <div className="bg-gray-50 rounded-xl p-3 text-[10px] text-gray-400 space-y-0.5">
+            <div className="font-semibold text-gray-500 uppercase tracking-wide mb-1">Unavailable measurements</div>
+            <div>• Echo / reflection depth — not directly measurable via Web Audio API</div>
+            <div>• Background hum frequency analysis — not implemented</div>
+            <div>• Voice clarity score — no speech quality model present</div>
           </div>
 
           <button onClick={onStart}
             className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-violet-600 mt-1">
-            <RefreshCw className="w-3 h-3"/> Re-run test
+            <RefreshCw className="w-3 h-3"/> Re-run mic check
           </button>
         </div>
       )}
@@ -520,11 +608,29 @@ function RoomTestStep({ phase, progress, rmsDb, measurements, error, onStart }: 
 }
 
 /* ─── ConfirmStep ────────────────────────────────────────────── */
-function ConfirmStep({ measurements, overrideRoom, onOverride }: {
+function ConfirmStep({
+  measurements,
+  overrideRoom,
+  onOverride,
+  roomGuesses,
+  customRoomName,
+  onCustomRoomName,
+}: {
   measurements: RoomMeasurements | null;
   overrideRoom: string;
   onOverride: (room: string) => void;
+  roomGuesses: [string, string, string];
+  customRoomName: string;
+  onCustomRoomName: (name: string) => void;
 }) {
+  const isCustomSelected = overrideRoom === 'Custom / Unknown';
+  const choiceLabels: Array<{ key: string; label: string; sub: string }> = [
+    { key: roomGuesses[0], label: roomGuesses[0], sub: 'Best match' },
+    { key: roomGuesses[1], label: roomGuesses[1], sub: 'Second possibility' },
+    { key: roomGuesses[2], label: roomGuesses[2], sub: 'Third possibility' },
+    { key: 'Custom / Unknown', label: 'Custom / Other', sub: 'Enter your own room name' },
+  ];
+
   const base = ROOM_PROFILES[overrideRoom] ?? ROOM_PROFILES['Custom / Unknown'];
 
   return (
@@ -534,57 +640,95 @@ function ConfirmStep({ measurements, overrideRoom, onOverride }: {
           <Home className="w-4 h-4 text-violet-600"/>
         </div>
         <div>
-          <div className="font-semibold text-gray-900 text-sm">Confirm Room Profile</div>
-          <div className="text-xs text-gray-500">Review and override before applying.</div>
+          <div className="font-semibold text-gray-900 text-sm">Detected Room Profile</div>
+          <div className="text-xs text-gray-500">
+            {measurements ? 'Select the best match or enter a custom name.' : 'No test data — choose the room type manually.'}
+          </div>
         </div>
       </div>
 
-      {/* Override selector */}
-      <div className="mb-4">
-        <label className="block text-xs text-gray-500 font-semibold uppercase tracking-wide mb-1.5">
-          Room type {measurements ? '(auto-detected — override if wrong)' : '(manual selection)'}
-        </label>
-        <select value={overrideRoom} onChange={e => onOverride(e.target.value)}
-          className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm text-gray-800 focus:outline-none focus:border-violet-400 bg-white">
-          {ROOM_TYPES.map(r => (
-            <option key={r} value={r}>{r}{measurements?.detectedRoom === r ? ' (detected)' : ''}</option>
-          ))}
-        </select>
+      {/* 4-choice room picker */}
+      <div className="space-y-2 mb-4">
+        {choiceLabels.map(({ key, label, sub }) => {
+          const selected = overrideRoom === key;
+          return (
+            <button
+              key={key}
+              onClick={() => onOverride(key)}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border-2 text-left transition-all ${
+                selected
+                  ? 'border-violet-500 bg-violet-50'
+                  : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50'
+              }`}
+            >
+              <div className={`w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center ${
+                selected ? 'border-violet-600' : 'border-gray-300'
+              }`}>
+                {selected && <div className="w-2 h-2 bg-violet-600 rounded-full"/>}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium text-gray-900">{label}</div>
+                <div className={`text-xs mt-0.5 ${selected && key !== 'Custom / Unknown' && sub === 'Best match' ? 'text-violet-600 font-medium' : 'text-gray-400'}`}>
+                  {sub}
+                </div>
+              </div>
+            </button>
+          );
+        })}
       </div>
+
+      {/* Custom name input */}
+      {isCustomSelected && (
+        <div className="mb-4">
+          <label className="block text-xs text-gray-500 font-semibold uppercase tracking-wide mb-1.5">
+            Room / Environment Name
+          </label>
+          <input
+            type="text"
+            value={customRoomName}
+            onChange={e => onCustomRoomName(e.target.value)}
+            placeholder="e.g. Basement, Shipping Container, Podcast Booth…"
+            className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm text-gray-800 focus:outline-none focus:border-violet-400 bg-white"
+            autoFocus
+          />
+        </div>
+      )}
 
       {/* Settings preview */}
       <div className="bg-gray-50 rounded-xl p-4 space-y-2">
-        <div className="text-[10px] text-gray-400 font-semibold uppercase tracking-wide mb-2">Settings that will be applied</div>
-
-        <SettingRow label="Input Gain"    value={`${Math.round(base.gain * 100)}%`}/>
-        <SettingRow label="Mic EQ Low"    value={fmtDb(base.eq.low)}/>
-        <SettingRow label="Mic EQ Mid"    value={fmtDb(base.eq.mid)}/>
-        <SettingRow label="Mic EQ High"   value={fmtDb(base.eq.high)}/>
-        <SettingRow label="Noise Gate"    value={base.gateEnabled ? `On (${base.gateThresholdDb} dBFS)` : 'Off'}
-          highlight={base.gateEnabled}/>
-        <SettingRow label="Compressor"    value={base.compEnabled ? 'On'  : 'Off'} highlight={base.compEnabled}/>
-        <SettingRow label="Limiter"       value={base.limiterEnabled ? 'On' : 'Off'} highlight={base.limiterEnabled}/>
-        <SettingRow label="Track Preset"  value={base.recommendedPreset}/>
+        <div className="text-[10px] text-gray-400 font-semibold uppercase tracking-wide mb-2">
+          Settings that will be applied
+        </div>
+        <SettingRow label="Input Gain"  value={`${Math.round(base.gain * 100)}%`}/>
+        <SettingRow label="Mic EQ Low"  value={fmtDb(base.eq.low)}/>
+        <SettingRow label="Mic EQ Mid"  value={fmtDb(base.eq.mid)}/>
+        <SettingRow label="Mic EQ High" value={fmtDb(base.eq.high)}/>
+        <SettingRow label="Noise Gate"  value={base.gateEnabled ? `On (${base.gateThresholdDb} dBFS)` : 'Off'} highlight={base.gateEnabled}/>
+        <SettingRow label="Compressor"  value={base.compEnabled    ? 'On' : 'Off'} highlight={base.compEnabled}/>
+        <SettingRow label="Limiter"     value={base.limiterEnabled ? 'On' : 'Off'} highlight={base.limiterEnabled}/>
+        <SettingRow label="Track Preset" value={base.recommendedPreset}/>
       </div>
 
-      <p className="text-[11px] text-gray-400 mt-3">
-        These are starting points — you can adjust all effects in the Mixer at any time.
-      </p>
+      {/* Unavailable effects note */}
+      <div className="mt-3 text-[11px] text-gray-400 space-y-0.5">
+        <div>Unavailable: AI noise reduction, de-reverberation — no model running.</div>
+        <div>These are starting points — adjust all effects in the Mixer at any time.</div>
+      </div>
     </div>
   );
 }
 
 /* ─── Helper components ──────────────────────────────────────── */
-function Metric({ label, value, note, warn, approx }: {
-  label: string; value: string; note: string; warn: boolean; approx?: boolean;
+function Metric({ label, value, note, warn, approx, unavailable }: {
+  label: string; value: string; note: string; warn: boolean; approx?: boolean; unavailable?: boolean;
 }) {
   return (
-    <div className={`rounded-xl p-3 border ${warn ? 'bg-yellow-50 border-yellow-200' : 'bg-gray-50 border-gray-200'}`}>
+    <div className={`rounded-xl p-3 border ${warn ? 'bg-yellow-50 border-yellow-200' : unavailable ? 'bg-gray-50 border-dashed border-gray-200' : 'bg-gray-50 border-gray-200'}`}>
       <div className="flex items-center gap-1">
         <span className="text-[10px] text-gray-500 font-semibold uppercase tracking-wide">{label}</span>
         {approx && <span className="text-[9px] text-gray-400">(est.)</span>}
       </div>
-      <div className={`text-sm font-bold mt-0.5 ${warn ? 'text-yellow-700' : 'text-gray-800'}`}>{value}</div>
+      <div className={`text-sm font-bold mt-0.5 ${warn ? 'text-yellow-700' : unavailable ? 'text-gray-400 italic' : 'text-gray-800'}`}>{value}</div>
       <div className={`text-[10px] mt-0.5 ${warn ? 'text-yellow-600' : 'text-gray-400'}`}>{note}</div>
     </div>
   );
@@ -593,16 +737,15 @@ function Metric({ label, value, note, warn, approx }: {
 function SpectralBar({ low, mid, high }: { low: number; mid: number; high: number }) {
   return (
     <div className="space-y-1.5">
-      {[['Low (< 500 Hz)',  low,  'bg-purple-400'], ['Mid (0.5–4 kHz)', mid, 'bg-violet-500'], ['High (> 4 kHz)',  high, 'bg-blue-400']]
-        .map(([lbl, pct, cls]) => (
-          <div key={lbl as string} className="flex items-center gap-2">
-            <span className="text-[10px] text-gray-500 w-28 shrink-0">{lbl as string}</span>
-            <div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
-              <div className={`h-full rounded-full ${cls as string}`} style={{width:`${pct as number}%`}}/>
-            </div>
-            <span className="text-[10px] text-gray-500 w-7 text-right">{pct as number}%</span>
+      {([['Low (< 500 Hz)', low, 'bg-purple-400'], ['Mid (0.5–4 kHz)', mid, 'bg-violet-500'], ['High (> 4 kHz)', high, 'bg-blue-400']] as const).map(([lbl, pct, cls]) => (
+        <div key={lbl} className="flex items-center gap-2">
+          <span className="text-[10px] text-gray-500 w-28 shrink-0">{lbl}</span>
+          <div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
+            <div className={`h-full rounded-full ${cls}`} style={{ width: `${pct}%` }}/>
           </div>
-        ))}
+          <span className="text-[10px] text-gray-500 w-7 text-right">{pct}%</span>
+        </div>
+      ))}
     </div>
   );
 }
