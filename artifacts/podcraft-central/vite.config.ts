@@ -103,11 +103,8 @@ export default defineConfig({
         ],
       },
 
-      // Enable service worker in dev so it can be tested without a production build
       devOptions: {
-        enabled: true,
-        type: "module",
-        navigateFallback: "index.html",
+        enabled: false,
       },
 
       includeAssets: [
