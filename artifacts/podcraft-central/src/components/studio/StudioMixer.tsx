@@ -5,7 +5,7 @@ import { engine } from '../../utils/studioAudioEngine';
 
 /* ── Pad data ─────────────────────────────────────────────────── */
 interface PadData {
-  id: number;
+  id: number;           // 0-5 = music, 6-11 = sfx
   label: string;
   buffer: AudioBuffer | null;
   filename: string;
@@ -21,7 +21,12 @@ const makePads = (): PadData[] =>
     playing: false,
   }));
 
-/* ── Main mixer component ─────────────────────────────────────── */
+/* ── Helper: format dB ────────────────────────────────────────── */
+const toDb = (v: number) => (v <= 0 ? '-∞' : (20 * Math.log10(v)).toFixed(1));
+
+/* ─────────────────────────────────────────────────────────────── */
+/*  StudioMixer                                                    */
+/* ─────────────────────────────────────────────────────────────── */
 export function StudioMixer() {
   const {
     tracks, updateTrack, masterVolume, setMasterVolume,
@@ -29,12 +34,28 @@ export function StudioMixer() {
     mixerOpen, setMixerOpen,
   } = useStudio();
 
+  /* Pad gain nodes + volumes — lifted here so Master area faders can control them */
+  const musicGainRef = useRef<GainNode | null>(null);
+  const sfxGainRef   = useRef<GainNode | null>(null);
+  const [musicPadVol, setMusicPadVol] = useState(0.8);
+  const [sfxPadVol,   setSfxPadVol]   = useState(0.8);
+
+  const handleMusicPadVol = useCallback((v: number) => {
+    setMusicPadVol(v);
+    if (musicGainRef.current) musicGainRef.current.gain.value = v;
+  }, []);
+  const handleSfxPadVol = useCallback((v: number) => {
+    setSfxPadVol(v);
+    if (sfxGainRef.current) sfxGainRef.current.gain.value = v;
+  }, []);
+
+  /* Drag state */
   const [position, setPosition] = useState(() => ({
-    x: Math.max(20, window.innerWidth - 820),
+    x: Math.max(20, window.innerWidth - 920),
     y: 80,
   }));
   const [minimized, setMinimized] = useState(false);
-  const [dragging, setDragging] = useState(false);
+  const [dragging,  setDragging]  = useState(false);
   const dragRef = useRef<{ active: boolean; ox: number; oy: number }>({ active: false, ox: 0, oy: 0 });
 
   const handleHeaderPointerDown = useCallback((e: React.PointerEvent) => {
@@ -49,25 +70,25 @@ export function StudioMixer() {
     const onMove = (e: PointerEvent) => {
       if (!dragRef.current.active) return;
       setPosition({
-        x: Math.max(0, Math.min(window.innerWidth - 200, e.clientX - dragRef.current.ox)),
-        y: Math.max(0, Math.min(window.innerHeight - 60, e.clientY - dragRef.current.oy)),
+        x: Math.max(0, Math.min(window.innerWidth  - 200, e.clientX - dragRef.current.ox)),
+        y: Math.max(0, Math.min(window.innerHeight - 60,  e.clientY - dragRef.current.oy)),
       });
     };
     const onUp = () => { dragRef.current.active = false; setDragging(false); };
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onUp);
+    window.addEventListener('pointermove',  onMove);
+    window.addEventListener('pointerup',    onUp);
+    window.addEventListener('pointercancel',onUp);
     return () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onUp);
+      window.removeEventListener('pointermove',  onMove);
+      window.removeEventListener('pointerup',    onUp);
+      window.removeEventListener('pointercancel',onUp);
     };
   }, [dragging]);
 
   if (!mixerOpen) return null;
 
-  const channelW = tracks.length * 82 + 180; // channels + master
-  const mixerW = Math.min(1200, Math.max(700, channelW + 280)); // +280 for pads
+  /* Width: track channels + expanded master (3 faders) + pad section */
+  const mixerW = Math.min(1300, Math.max(900, tracks.length * 82 + 540));
 
   return (
     <div
@@ -90,25 +111,44 @@ export function StudioMixer() {
             <div className="w-2 h-2 bg-violet-500 rounded-full animate-pulse" />
           </div>
           <button onClick={() => setMinimized(!minimized)} className="text-gray-400 hover:text-gray-600 p-0.5"><Minus className="w-4 h-4" /></button>
-          <button onClick={() => setMixerOpen(false)} className="text-gray-400 hover:text-gray-600 p-0.5"><X className="w-4 h-4" /></button>
+          <button onClick={() => setMixerOpen(false)}      className="text-gray-400 hover:text-gray-600 p-0.5"><X     className="w-4 h-4" /></button>
         </div>
       </div>
 
-      {/* ── Channel strips + Pads ── */}
+      {/* ── Body: channel strips | master+pad faders | pads ── */}
       {!minimized && (
         <div className="flex" style={{ touchAction: 'auto' }}>
-          {/* Channel strips */}
-          <div className="flex px-4 pt-4 pb-2 gap-3 overflow-x-auto flex-shrink-0">
-            {tracks.map((track) => <MixerChannel key={track.id} track={track} updateTrack={updateTrack} />)}
-            <div className="w-px bg-gray-200 mx-1 self-stretch" />
-            <MasterChannel masterVolume={masterVolume} setMasterVolume={setMasterVolume} />
+
+          {/* ① Track channel strips */}
+          <div className="flex px-4 pt-4 pb-3 gap-3 overflow-x-auto flex-shrink-0">
+            {tracks.map((track) => (
+              <MixerChannel key={track.id} track={track} updateTrack={updateTrack} />
+            ))}
           </div>
 
-          {/* Divider */}
+          {/* ② Divider */}
           <div className="w-px bg-gray-200 my-3 flex-shrink-0" />
 
-          {/* Sound pads */}
-          <SoundPadSection />
+          {/* ③ Master + Music Bed + SFX faders */}
+          <MasterSection
+            masterVolume={masterVolume}
+            setMasterVolume={setMasterVolume}
+            musicPadVol={musicPadVol}
+            onMusicPadVol={handleMusicPadVol}
+            sfxPadVol={sfxPadVol}
+            onSfxPadVol={handleSfxPadVol}
+          />
+
+          {/* ④ Divider */}
+          <div className="w-px bg-gray-200 my-3 flex-shrink-0" />
+
+          {/* ⑤ Sound pads — NO fader here */}
+          <SoundPadSection
+            musicGainRef={musicGainRef}
+            sfxGainRef={sfxGainRef}
+            musicVolume={musicPadVol}
+            sfxVolume={sfxPadVol}
+          />
         </div>
       )}
 
@@ -155,25 +195,112 @@ export function StudioMixer() {
   );
 }
 
-/* ── Sound pad section ────────────────────────────────────────── */
-function SoundPadSection() {
+/* ─────────────────────────────────────────────────────────────── */
+/*  MasterSection — Master + Music Bed + SFX faders               */
+/* ─────────────────────────────────────────────────────────────── */
+function MasterSection({
+  masterVolume, setMasterVolume,
+  musicPadVol,  onMusicPadVol,
+  sfxPadVol,    onSfxPadVol,
+}: {
+  masterVolume: number;  setMasterVolume: (v: number) => void;
+  musicPadVol: number;   onMusicPadVol:   (v: number) => void;
+  sfxPadVol: number;     onSfxPadVol:     (v: number) => void;
+}) {
+  return (
+    <div className="flex pt-4 pb-3 px-3 gap-4 flex-shrink-0">
+      {/* Master */}
+      <FaderChannel
+        label="Master"
+        sublabel="Stereo Out"
+        color="#8b5cf6"
+        value={masterVolume}
+        onChange={setMasterVolume}
+        showScale
+      />
+      <div className="w-px bg-gray-100 self-stretch" />
+      {/* Music Bed fader — controls music pad gain */}
+      <FaderChannel
+        label="Music Bed"
+        sublabel="Pads →"
+        color="#3b82f6"
+        value={musicPadVol}
+        onChange={onMusicPadVol}
+      />
+      {/* SFX fader — controls sfx pad gain */}
+      <FaderChannel
+        label="SFX"
+        sublabel="Pads →"
+        color="#f97316"
+        value={sfxPadVol}
+        onChange={onSfxPadVol}
+      />
+    </div>
+  );
+}
+
+/* Single labeled fader column */
+function FaderChannel({
+  label, sublabel, color, value, onChange, showScale = false,
+}: {
+  label: string; sublabel: string; color: string;
+  value: number; onChange: (v: number) => void; showScale?: boolean;
+}) {
+  const db = ((value - 1) * 12).toFixed(1);
+  return (
+    <div className="flex flex-col items-center gap-2 flex-shrink-0" style={{ width: 62 }}>
+      <span className="text-[10px] font-bold text-gray-800 truncate w-full text-center" title={label}>{label}</span>
+      {/* placeholder M/S buttons to align with channel strips */}
+      <div className="flex gap-1">
+        <div className="w-7 h-6 rounded bg-gray-50 border border-gray-100" />
+        <div className="w-7 h-6 rounded bg-gray-50 border border-gray-100" />
+      </div>
+      {/* Spacer matching pan knob height */}
+      <div style={{ height: 42 }} />
+      <div className="relative">
+        {showScale && (
+          <div className="absolute -left-7 top-0 bottom-0 flex flex-col justify-between text-[8px] text-gray-400 font-mono pr-1 pointer-events-none">
+            {['+12', '+6', '0', '-6', '-12', '-24', '-∞'].map((l) => <span key={l}>{l}</span>)}
+          </div>
+        )}
+        <VerticalFader value={value} onChange={onChange} color={color} />
+      </div>
+      <div className="w-full py-1 bg-gray-50 border border-gray-200 rounded text-center text-[10px] font-mono text-gray-600">{db} dB</div>
+      <span className="text-[9px] text-gray-400">{sublabel}</span>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────── */
+/*  SoundPadSection — 2×3 Music pads / separator / 2×3 SFX pads  */
+/*  NO fader inside — faders live in MasterSection                */
+/* ─────────────────────────────────────────────────────────────── */
+function SoundPadSection({
+  musicGainRef, sfxGainRef, musicVolume, sfxVolume,
+}: {
+  musicGainRef: React.MutableRefObject<GainNode | null>;
+  sfxGainRef:   React.MutableRefObject<GainNode | null>;
+  musicVolume: number;
+  sfxVolume: number;
+}) {
   const [pads, setPads] = useState<PadData[]>(makePads);
-  const [padVolume, setPadVolume] = useState(0.8);
-  const padGainRef = useRef<GainNode | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef  = useRef<HTMLInputElement>(null);
   const loadingPadRef = useRef(-1);
   const activeSources = useRef(new Map<number, AudioBufferSourceNode>());
 
-  const getPadGain = useCallback(() => {
-    if (padGainRef.current) return padGainRef.current;
+  /* Create (or return) the appropriate gain node for music vs sfx */
+  const getGain = useCallback((isMusic: boolean): GainNode | null => {
+    const ref = isMusic ? musicGainRef : sfxGainRef;
+    const vol = isMusic ? musicVolume  : sfxVolume;
+    if (ref.current) return ref.current;
     engine.init();
     if (!engine.ctx || !engine.masterGain) return null;
     const g = engine.ctx.createGain();
-    g.gain.value = padVolume;
+    g.gain.value = vol;
     g.connect(engine.masterGain);
-    padGainRef.current = g;
+    ref.current = g;
     return g;
-  }, [padVolume]);
+  }, [musicGainRef, sfxGainRef, musicVolume, sfxVolume]);
 
   const handlePadClick = (pad: PadData) => {
     if (!pad.buffer) {
@@ -182,11 +309,14 @@ function SoundPadSection() {
       return;
     }
     engine.init();
-    const gain = getPadGain();
-    if (!gain || !engine.ctx) return;
-    // stop if already playing
+    if (!engine.ctx) return;
+    const gain = getGain(pad.id < 6);
+    if (!gain) return;
+
+    /* Stop if already playing */
     const existing = activeSources.current.get(pad.id);
     if (existing) { try { existing.stop(); } catch { /* ok */ } activeSources.current.delete(pad.id); }
+
     const src = engine.ctx.createBufferSource();
     src.buffer = pad.buffer;
     src.connect(gain);
@@ -205,11 +335,11 @@ function SoundPadSection() {
     engine.init();
     if (!engine.ctx) return;
     try {
-      const buf = await engine.ctx.decodeAudioData(await file.arrayBuffer());
-      const padId = loadingPadRef.current;
-      const shortName = file.name.replace(/\.[^/.]+$/, '').slice(0, 9);
+      const buf       = await engine.ctx.decodeAudioData(await file.arrayBuffer());
+      const padId     = loadingPadRef.current;
+      const shortName = file.name.replace(/\.[^/.]+$/, '').slice(0, 10);
       setPads((prev) => prev.map((p) => p.id === padId ? { ...p, buffer: buf, filename: file.name, label: shortName } : p));
-    } catch { /* unsupported format */ }
+    } catch { /* unsupported format — silent */ }
     loadingPadRef.current = -1;
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
@@ -222,56 +352,49 @@ function SoundPadSection() {
       : p));
   };
 
-  const updatePadVolume = (v: number) => {
-    setPadVolume(v);
-    if (padGainRef.current) padGainRef.current.gain.value = v;
-  };
-
   const musicPads = pads.slice(0, 6);
-  const sfxPads = pads.slice(6, 12);
-  const padDb = padVolume <= 0 ? '-∞' : (20 * Math.log10(padVolume)).toFixed(1);
+  const sfxPads   = pads.slice(6, 12);
 
   return (
-    <div className="flex gap-3 px-3 pt-4 pb-2 flex-shrink-0">
-      {/* Pad grids */}
-      <div className="flex flex-col gap-3">
+    <div className="flex flex-col justify-center px-4 pt-4 pb-3 gap-0 flex-shrink-0">
 
-        {/* Music row */}
-        <div>
-          <div className="flex items-center gap-1 mb-1.5">
-            <Music className="w-3 h-3 text-blue-500" />
-            <span className="text-[9px] font-bold text-blue-600 tracking-widest uppercase">Music</span>
-          </div>
-          <div className="grid grid-cols-6 gap-1">
-            {musicPads.map((pad) => (
-              <PadButton key={pad.id} pad={pad} type="music"
-                onClick={() => handlePadClick(pad)}
-                onClear={() => clearPad(pad.id)} />
-            ))}
-          </div>
+      {/* ── Music Bed section ── */}
+      <div>
+        <div className="flex items-center gap-1.5 mb-2">
+          <Music className="w-3.5 h-3.5 text-blue-500" />
+          <span className="text-[10px] font-bold text-blue-700 tracking-widest uppercase">Music Bed</span>
         </div>
-
-        {/* SFX row */}
-        <div>
-          <div className="flex items-center gap-1 mb-1.5">
-            <Zap className="w-3 h-3 text-orange-500" />
-            <span className="text-[9px] font-bold text-orange-600 tracking-widest uppercase">SFX</span>
-          </div>
-          <div className="grid grid-cols-6 gap-1">
-            {sfxPads.map((pad) => (
-              <PadButton key={pad.id} pad={pad} type="sfx"
-                onClick={() => handlePadClick(pad)}
-                onClear={() => clearPad(pad.id)} />
-            ))}
-          </div>
+        {/* 2 rows × 3 columns */}
+        <div className="grid grid-cols-3 gap-2">
+          {musicPads.map((pad) => (
+            <PadButton key={pad.id} pad={pad} type="music"
+              onClick={() => handlePadClick(pad)}
+              onClear={() => clearPad(pad.id)} />
+          ))}
         </div>
       </div>
 
-      {/* Pad volume fader */}
-      <div className="flex flex-col items-center gap-1 pl-2 border-l border-gray-100">
-        <span className="text-[9px] font-bold text-gray-400 tracking-wider">PAD</span>
-        <VerticalFader value={padVolume} onChange={updatePadVolume} color="#f97316" />
-        <span className="text-[9px] font-mono text-gray-400">{padDb} dB</span>
+      {/* ── Separator ── */}
+      <div className="flex items-center gap-2 my-3">
+        <div className="flex-1 h-px bg-gray-300" />
+        <span className="text-[9px] text-gray-400 font-semibold tracking-widest uppercase">SFX</span>
+        <div className="flex-1 h-px bg-gray-300" />
+      </div>
+
+      {/* ── Sound Effects section ── */}
+      <div>
+        <div className="flex items-center gap-1.5 mb-2">
+          <Zap className="w-3.5 h-3.5 text-orange-500" />
+          <span className="text-[10px] font-bold text-orange-700 tracking-widest uppercase">Sound Effects</span>
+        </div>
+        {/* 2 rows × 3 columns */}
+        <div className="grid grid-cols-3 gap-2">
+          {sfxPads.map((pad) => (
+            <PadButton key={pad.id} pad={pad} type="sfx"
+              onClick={() => handlePadClick(pad)}
+              onClear={() => clearPad(pad.id)} />
+          ))}
+        </div>
       </div>
 
       <input ref={fileInputRef} type="file" accept="audio/*" className="hidden" onChange={handleFileLoad} />
@@ -279,46 +402,56 @@ function SoundPadSection() {
   );
 }
 
-/* ── Pad button ───────────────────────────────────────────────── */
+/* ─────────────────────────────────────────────────────────────── */
+/*  PadButton — large, usable performance pad                      */
+/* ─────────────────────────────────────────────────────────────── */
 function PadButton({ pad, type, onClick, onClear }: {
   pad: PadData; type: 'music' | 'sfx';
   onClick: () => void; onClear: () => void;
 }) {
   const loaded = !!pad.buffer;
-  const colorLoaded = type === 'music'
-    ? `bg-blue-100 border-blue-400 text-blue-800 hover:bg-blue-200 ${pad.playing ? 'ring-2 ring-blue-400 ring-offset-1 bg-blue-200' : ''}`
-    : `bg-orange-100 border-orange-400 text-orange-800 hover:bg-orange-200 ${pad.playing ? 'ring-2 ring-orange-400 ring-offset-1 bg-orange-200' : ''}`;
-  const colorEmpty = 'bg-gray-50 border-dashed border-gray-300 text-gray-400 hover:bg-gray-100 hover:border-gray-400';
+
+  const loadedStyle = type === 'music'
+    ? `bg-blue-100 border-blue-400 text-blue-900 hover:bg-blue-200${pad.playing ? ' ring-2 ring-blue-500 ring-offset-1 !bg-blue-300' : ''}`
+    : `bg-orange-100 border-orange-400 text-orange-900 hover:bg-orange-200${pad.playing ? ' ring-2 ring-orange-500 ring-offset-1 !bg-orange-300' : ''}`;
+
+  const emptyStyle = 'bg-gray-50 border-dashed border-gray-300 text-gray-400 hover:bg-gray-100 hover:border-gray-400';
 
   return (
     <button
       onClick={onClick}
       onPointerDown={(e) => e.stopPropagation()}
       onContextMenu={(e) => { e.preventDefault(); if (loaded) onClear(); }}
-      title={loaded ? `${pad.filename}\nClick to play · Right-click to clear` : `Click to load audio (${pad.label})`}
-      className={`w-[42px] h-[38px] rounded-lg border text-[8px] font-bold flex flex-col items-center justify-center gap-0.5 transition-all ${loaded ? colorLoaded : colorEmpty}`}>
+      title={loaded
+        ? `${pad.filename}\nClick to play  ·  Right-click to clear`
+        : `Click to load audio file (${pad.label})`}
+      className={`w-20 h-16 rounded-xl border-2 text-[10px] font-bold flex flex-col items-center justify-center gap-1 transition-all ${loaded ? loadedStyle : emptyStyle}`}>
       {loaded ? (
         <>
-          <span className="truncate w-full text-center px-0.5 leading-tight">{pad.label}</span>
-          {pad.playing && <div className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />}
+          <span className="truncate w-full text-center px-1 leading-tight text-[11px]">{pad.label}</span>
+          {pad.playing
+            ? <div className="flex gap-0.5">{[0,1,2].map(i=><div key={i} className="w-1 h-3 bg-current rounded-sm animate-bounce" style={{animationDelay:`${i*0.1}s`}}/>)}</div>
+            : <div className="text-[9px] opacity-50">▶ play</div>}
         </>
       ) : (
         <>
-          <Plus className="w-3 h-3" />
-          <span>{pad.id < 6 ? `M${pad.id + 1}` : `S${pad.id - 5}`}</span>
+          <Plus className="w-4 h-4" />
+          <span className="text-[9px]">{pad.id < 6 ? `M${pad.id + 1}` : `S${pad.id - 5}`}</span>
         </>
       )}
     </button>
   );
 }
 
-/* ── Pan knob ─────────────────────────────────────────────────── */
+/* ─────────────────────────────────────────────────────────────── */
+/*  Pan knob                                                       */
+/* ─────────────────────────────────────────────────────────────── */
 function PanKnob({ value, onChange, color }: { value: number; onChange: (v: number) => void; color: string }) {
   const isDragging = useRef(false);
-  const startX = useRef(0);
-  const startVal = useRef(0);
-  const deg = value * 135;
-  const panLabel = value === 0 ? 'C' : value < 0 ? `L${Math.round(-value * 100)}` : `R${Math.round(value * 100)}`;
+  const startX     = useRef(0);
+  const startVal   = useRef(0);
+  const deg        = value * 135;
+  const panLabel   = value === 0 ? 'C' : value < 0 ? `L${Math.round(-value * 100)}` : `R${Math.round(value * 100)}`;
 
   return (
     <div className="flex flex-col items-center gap-0.5">
@@ -346,11 +479,13 @@ function PanKnob({ value, onChange, color }: { value: number; onChange: (v: numb
   );
 }
 
-/* ── Vertical fader — FIXED: uses e.currentTarget for pointer capture ── */
+/* ─────────────────────────────────────────────────────────────── */
+/*  Vertical fader — pointer capture on currentTarget (not target) */
+/* ─────────────────────────────────────────────────────────────── */
 function VerticalFader({ value, onChange, color, min = 0, max = 1.5 }: {
   value: number; onChange: (v: number) => void; color: string; min?: number; max?: number;
 }) {
-  const trackRef = useRef<HTMLDivElement>(null);
+  const trackRef   = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
 
   const updateFromY = useCallback((clientY: number) => {
@@ -369,7 +504,7 @@ function VerticalFader({ value, onChange, color, min = 0, max = 1.5 }: {
       onPointerDown={(e) => {
         e.stopPropagation();
         isDragging.current = true;
-        e.currentTarget.setPointerCapture(e.pointerId); // ← fixed: currentTarget not target
+        e.currentTarget.setPointerCapture(e.pointerId);
         updateFromY(e.clientY);
       }}
       onPointerMove={(e) => {
@@ -379,11 +514,11 @@ function VerticalFader({ value, onChange, color, min = 0, max = 1.5 }: {
       }}
       onPointerUp={(e) => {
         isDragging.current = false;
-        e.currentTarget.releasePointerCapture(e.pointerId); // ← fixed
+        e.currentTarget.releasePointerCapture(e.pointerId);
       }}
       onPointerCancel={(e) => {
         isDragging.current = false;
-        e.currentTarget.releasePointerCapture(e.pointerId); // ← fixed
+        e.currentTarget.releasePointerCapture(e.pointerId);
       }}>
       {/* Rail */}
       <div className="absolute top-1 bottom-1 w-0.5 bg-gray-200 rounded-full">
@@ -401,7 +536,9 @@ function VerticalFader({ value, onChange, color, min = 0, max = 1.5 }: {
   );
 }
 
-/* ── Channel strip ────────────────────────────────────────────── */
+/* ─────────────────────────────────────────────────────────────── */
+/*  MixerChannel — track channel strip                             */
+/* ─────────────────────────────────────────────────────────────── */
 function MixerChannel({ track, updateTrack }: { track: Track; updateTrack: (id: string, updates: Partial<Track>) => void }) {
   const db = ((track.volume - 1) * 12).toFixed(1);
   return (
@@ -416,36 +553,6 @@ function MixerChannel({ track, updateTrack }: { track: Track; updateTrack: (id: 
       <PanKnob value={track.pan} onChange={(v) => updateTrack(track.id, { pan: v })} color={track.color} />
       <VerticalFader value={track.volume} onChange={(v) => updateTrack(track.id, { volume: v })} color={track.color} />
       <div className="w-14 py-1 bg-gray-50 border border-gray-200 rounded text-center text-[10px] font-mono text-gray-600">{db} dB</div>
-    </div>
-  );
-}
-
-/* ── Master channel ───────────────────────────────────────────── */
-function MasterChannel({ masterVolume, setMasterVolume }: { masterVolume: number; setMasterVolume: (v: number) => void }) {
-  const db = ((masterVolume - 1) * 12).toFixed(1);
-  return (
-    <div className="flex flex-col items-center gap-2 flex-shrink-0" style={{ width: 68 }}>
-      <span className="text-[10px] font-bold text-gray-900 w-full text-center">Master</span>
-      <div className="flex gap-1">
-        <button className="w-7 h-6 rounded bg-gray-100 text-gray-400 text-xs font-bold cursor-default">M</button>
-        <button className="w-7 h-6 rounded bg-gray-100 text-gray-400 text-xs font-bold cursor-default">S</button>
-      </div>
-      <div className="flex flex-col items-center gap-0.5">
-        <div className="w-9 h-9 rounded-full border-2 border-gray-300 relative" title="Master — fixed center">
-          <div className="absolute rounded-full bg-gray-400"
-            style={{ width: 2, height: 10, top: '50%', left: '50%', transformOrigin: '50% 100%', transform: 'translate(-50%, -100%) rotate(0deg)' }} />
-          <div className="absolute top-0.5 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-gray-300" />
-        </div>
-        <span className="text-[9px] font-mono text-gray-400">C</span>
-      </div>
-      <div className="relative">
-        <div className="absolute -left-7 top-0 bottom-0 flex flex-col justify-between text-[8px] text-gray-400 font-mono pr-1">
-          {['+12', '+6', '0', '-6', '-12', '-24', '-∞'].map((l) => <span key={l}>{l}</span>)}
-        </div>
-        <VerticalFader value={masterVolume} onChange={setMasterVolume} color="#8b5cf6" />
-      </div>
-      <div className="w-14 py-1 bg-gray-50 border border-gray-200 rounded text-center text-[10px] font-mono text-gray-600">{db} dB</div>
-      <span className="text-[9px] text-gray-400">Stereo Out</span>
     </div>
   );
 }
