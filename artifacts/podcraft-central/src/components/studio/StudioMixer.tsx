@@ -1,7 +1,27 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { X, Minus, Rewind, Square, Play, Circle, FastForward } from 'lucide-react';
+import { X, Minus, Rewind, Square, Play, Circle, FastForward, Music, Zap, Plus } from 'lucide-react';
 import { useStudio, Track } from '../../store/StudioContext';
+import { engine } from '../../utils/studioAudioEngine';
 
+/* ── Pad data ─────────────────────────────────────────────────── */
+interface PadData {
+  id: number;
+  label: string;
+  buffer: AudioBuffer | null;
+  filename: string;
+  playing: boolean;
+}
+
+const makePads = (): PadData[] =>
+  Array.from({ length: 12 }, (_, i) => ({
+    id: i,
+    label: i < 6 ? `M${i + 1}` : `S${i - 5}`,
+    buffer: null,
+    filename: '',
+    playing: false,
+  }));
+
+/* ── Main mixer component ─────────────────────────────────────── */
 export function StudioMixer() {
   const {
     tracks, updateTrack, masterVolume, setMasterVolume,
@@ -10,7 +30,7 @@ export function StudioMixer() {
   } = useStudio();
 
   const [position, setPosition] = useState(() => ({
-    x: Math.max(20, window.innerWidth - 740),
+    x: Math.max(20, window.innerWidth - 820),
     y: 80,
   }));
   const [minimized, setMinimized] = useState(false);
@@ -46,14 +66,15 @@ export function StudioMixer() {
 
   if (!mixerOpen) return null;
 
-  const mixerW = Math.min(960, tracks.length * 82 + 180);
+  const channelW = tracks.length * 82 + 180; // channels + master
+  const mixerW = Math.min(1200, Math.max(700, channelW + 280)); // +280 for pads
 
   return (
     <div
       className="fixed bg-white rounded-xl shadow-2xl border border-gray-200 flex flex-col z-[100] overflow-hidden select-none"
       style={{ left: position.x, top: position.y, width: mixerW, touchAction: 'none' }}>
 
-      {/* ── Title bar / drag handle ── */}
+      {/* ── Title bar ── */}
       <div
         className={`h-10 bg-gray-50 border-b border-gray-200 flex items-center justify-between px-4 ${dragging ? 'cursor-grabbing' : 'cursor-grab'}`}
         onPointerDown={handleHeaderPointerDown}
@@ -73,12 +94,21 @@ export function StudioMixer() {
         </div>
       </div>
 
-      {/* ── Channel strips ── */}
+      {/* ── Channel strips + Pads ── */}
       {!minimized && (
-        <div className="flex px-4 pt-4 pb-2 gap-3 overflow-x-auto" style={{ touchAction: 'auto' }}>
-          {tracks.map((track) => <MixerChannel key={track.id} track={track} updateTrack={updateTrack} />)}
-          <div className="w-px bg-gray-200 mx-1 self-stretch" />
-          <MasterChannel masterVolume={masterVolume} setMasterVolume={setMasterVolume} />
+        <div className="flex" style={{ touchAction: 'auto' }}>
+          {/* Channel strips */}
+          <div className="flex px-4 pt-4 pb-2 gap-3 overflow-x-auto flex-shrink-0">
+            {tracks.map((track) => <MixerChannel key={track.id} track={track} updateTrack={updateTrack} />)}
+            <div className="w-px bg-gray-200 mx-1 self-stretch" />
+            <MasterChannel masterVolume={masterVolume} setMasterVolume={setMasterVolume} />
+          </div>
+
+          {/* Divider */}
+          <div className="w-px bg-gray-200 my-3 flex-shrink-0" />
+
+          {/* Sound pads */}
+          <SoundPadSection />
         </div>
       )}
 
@@ -86,29 +116,17 @@ export function StudioMixer() {
       <div className="border-t border-gray-100 bg-gray-50 px-4 py-3 flex items-center justify-center flex-shrink-0">
         <div className="flex items-center gap-2">
 
-          {/* Rewind */}
-          <button
-            onClick={stop}
-            onPointerDown={(e) => e.stopPropagation()}
-            title="Rewind to start"
+          <button onClick={stop} onPointerDown={(e) => e.stopPropagation()} title="Rewind to start"
             className="w-11 h-11 flex items-center justify-center rounded-full bg-white border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-gray-300 shadow-sm transition-all">
             <Rewind className="w-5 h-5" />
           </button>
 
-          {/* Stop */}
-          <button
-            onClick={stop}
-            onPointerDown={(e) => e.stopPropagation()}
-            title="Stop"
+          <button onClick={stop} onPointerDown={(e) => e.stopPropagation()} title="Stop"
             className="w-11 h-11 flex items-center justify-center rounded-full bg-white border border-gray-200 text-gray-700 hover:bg-gray-100 hover:border-gray-300 shadow-sm transition-all">
             <Square className="w-5 h-5 fill-current" />
           </button>
 
-          {/* Play — always green-tinted */}
-          <button
-            onClick={togglePlay}
-            onPointerDown={(e) => e.stopPropagation()}
-            title={isPlaying ? 'Pause' : 'Play'}
+          <button onClick={togglePlay} onPointerDown={(e) => e.stopPropagation()} title={isPlaying ? 'Pause' : 'Play'}
             className={`w-14 h-14 flex items-center justify-center rounded-full shadow-md transition-all border-2 ${
               isPlaying
                 ? 'bg-green-500 border-green-500 text-white shadow-green-200'
@@ -117,11 +135,7 @@ export function StudioMixer() {
             <Play className="w-6 h-6 fill-current ml-0.5" />
           </button>
 
-          {/* Record — always red-tinted */}
-          <button
-            onClick={toggleRecord}
-            onPointerDown={(e) => e.stopPropagation()}
-            title={isRecording ? 'Stop Recording' : 'Record'}
+          <button onClick={toggleRecord} onPointerDown={(e) => e.stopPropagation()} title={isRecording ? 'Stop Recording' : 'Record'}
             className={`w-14 h-14 flex items-center justify-center rounded-full shadow-md transition-all border-2 ${
               isRecording
                 ? 'bg-red-500 border-red-500 text-white shadow-red-200 animate-pulse'
@@ -130,11 +144,7 @@ export function StudioMixer() {
             <Circle className="w-6 h-6 fill-current" />
           </button>
 
-          {/* Fast Forward */}
-          <button
-            onClick={() => {}}
-            onPointerDown={(e) => e.stopPropagation()}
-            title="Fast Forward"
+          <button onPointerDown={(e) => e.stopPropagation()} title="Fast Forward"
             className="w-11 h-11 flex items-center justify-center rounded-full bg-white border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-gray-300 shadow-sm transition-all">
             <FastForward className="w-5 h-5" />
           </button>
@@ -142,6 +152,163 @@ export function StudioMixer() {
         </div>
       </div>
     </div>
+  );
+}
+
+/* ── Sound pad section ────────────────────────────────────────── */
+function SoundPadSection() {
+  const [pads, setPads] = useState<PadData[]>(makePads);
+  const [padVolume, setPadVolume] = useState(0.8);
+  const padGainRef = useRef<GainNode | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const loadingPadRef = useRef(-1);
+  const activeSources = useRef(new Map<number, AudioBufferSourceNode>());
+
+  const getPadGain = useCallback(() => {
+    if (padGainRef.current) return padGainRef.current;
+    engine.init();
+    if (!engine.ctx || !engine.masterGain) return null;
+    const g = engine.ctx.createGain();
+    g.gain.value = padVolume;
+    g.connect(engine.masterGain);
+    padGainRef.current = g;
+    return g;
+  }, [padVolume]);
+
+  const handlePadClick = (pad: PadData) => {
+    if (!pad.buffer) {
+      loadingPadRef.current = pad.id;
+      fileInputRef.current?.click();
+      return;
+    }
+    engine.init();
+    const gain = getPadGain();
+    if (!gain || !engine.ctx) return;
+    // stop if already playing
+    const existing = activeSources.current.get(pad.id);
+    if (existing) { try { existing.stop(); } catch { /* ok */ } activeSources.current.delete(pad.id); }
+    const src = engine.ctx.createBufferSource();
+    src.buffer = pad.buffer;
+    src.connect(gain);
+    src.start();
+    src.onended = () => {
+      activeSources.current.delete(pad.id);
+      setPads((prev) => prev.map((p) => p.id === pad.id ? { ...p, playing: false } : p));
+    };
+    activeSources.current.set(pad.id, src);
+    setPads((prev) => prev.map((p) => p.id === pad.id ? { ...p, playing: true } : p));
+  };
+
+  const handleFileLoad = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || loadingPadRef.current === -1) return;
+    engine.init();
+    if (!engine.ctx) return;
+    try {
+      const buf = await engine.ctx.decodeAudioData(await file.arrayBuffer());
+      const padId = loadingPadRef.current;
+      const shortName = file.name.replace(/\.[^/.]+$/, '').slice(0, 9);
+      setPads((prev) => prev.map((p) => p.id === padId ? { ...p, buffer: buf, filename: file.name, label: shortName } : p));
+    } catch { /* unsupported format */ }
+    loadingPadRef.current = -1;
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const clearPad = (id: number) => {
+    const src = activeSources.current.get(id);
+    if (src) { try { src.stop(); } catch { /* ok */ } activeSources.current.delete(id); }
+    setPads((prev) => prev.map((p) => p.id === id
+      ? { ...p, buffer: null, filename: '', label: p.id < 6 ? `M${p.id + 1}` : `S${p.id - 5}`, playing: false }
+      : p));
+  };
+
+  const updatePadVolume = (v: number) => {
+    setPadVolume(v);
+    if (padGainRef.current) padGainRef.current.gain.value = v;
+  };
+
+  const musicPads = pads.slice(0, 6);
+  const sfxPads = pads.slice(6, 12);
+  const padDb = padVolume <= 0 ? '-∞' : (20 * Math.log10(padVolume)).toFixed(1);
+
+  return (
+    <div className="flex gap-3 px-3 pt-4 pb-2 flex-shrink-0">
+      {/* Pad grids */}
+      <div className="flex flex-col gap-3">
+
+        {/* Music row */}
+        <div>
+          <div className="flex items-center gap-1 mb-1.5">
+            <Music className="w-3 h-3 text-blue-500" />
+            <span className="text-[9px] font-bold text-blue-600 tracking-widest uppercase">Music</span>
+          </div>
+          <div className="grid grid-cols-6 gap-1">
+            {musicPads.map((pad) => (
+              <PadButton key={pad.id} pad={pad} type="music"
+                onClick={() => handlePadClick(pad)}
+                onClear={() => clearPad(pad.id)} />
+            ))}
+          </div>
+        </div>
+
+        {/* SFX row */}
+        <div>
+          <div className="flex items-center gap-1 mb-1.5">
+            <Zap className="w-3 h-3 text-orange-500" />
+            <span className="text-[9px] font-bold text-orange-600 tracking-widest uppercase">SFX</span>
+          </div>
+          <div className="grid grid-cols-6 gap-1">
+            {sfxPads.map((pad) => (
+              <PadButton key={pad.id} pad={pad} type="sfx"
+                onClick={() => handlePadClick(pad)}
+                onClear={() => clearPad(pad.id)} />
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Pad volume fader */}
+      <div className="flex flex-col items-center gap-1 pl-2 border-l border-gray-100">
+        <span className="text-[9px] font-bold text-gray-400 tracking-wider">PAD</span>
+        <VerticalFader value={padVolume} onChange={updatePadVolume} color="#f97316" />
+        <span className="text-[9px] font-mono text-gray-400">{padDb} dB</span>
+      </div>
+
+      <input ref={fileInputRef} type="file" accept="audio/*" className="hidden" onChange={handleFileLoad} />
+    </div>
+  );
+}
+
+/* ── Pad button ───────────────────────────────────────────────── */
+function PadButton({ pad, type, onClick, onClear }: {
+  pad: PadData; type: 'music' | 'sfx';
+  onClick: () => void; onClear: () => void;
+}) {
+  const loaded = !!pad.buffer;
+  const colorLoaded = type === 'music'
+    ? `bg-blue-100 border-blue-400 text-blue-800 hover:bg-blue-200 ${pad.playing ? 'ring-2 ring-blue-400 ring-offset-1 bg-blue-200' : ''}`
+    : `bg-orange-100 border-orange-400 text-orange-800 hover:bg-orange-200 ${pad.playing ? 'ring-2 ring-orange-400 ring-offset-1 bg-orange-200' : ''}`;
+  const colorEmpty = 'bg-gray-50 border-dashed border-gray-300 text-gray-400 hover:bg-gray-100 hover:border-gray-400';
+
+  return (
+    <button
+      onClick={onClick}
+      onPointerDown={(e) => e.stopPropagation()}
+      onContextMenu={(e) => { e.preventDefault(); if (loaded) onClear(); }}
+      title={loaded ? `${pad.filename}\nClick to play · Right-click to clear` : `Click to load audio (${pad.label})`}
+      className={`w-[42px] h-[38px] rounded-lg border text-[8px] font-bold flex flex-col items-center justify-center gap-0.5 transition-all ${loaded ? colorLoaded : colorEmpty}`}>
+      {loaded ? (
+        <>
+          <span className="truncate w-full text-center px-0.5 leading-tight">{pad.label}</span>
+          {pad.playing && <div className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />}
+        </>
+      ) : (
+        <>
+          <Plus className="w-3 h-3" />
+          <span>{pad.id < 6 ? `M${pad.id + 1}` : `S${pad.id - 5}`}</span>
+        </>
+      )}
+    </button>
   );
 }
 
@@ -179,30 +346,54 @@ function PanKnob({ value, onChange, color }: { value: number; onChange: (v: numb
   );
 }
 
-/* ── Vertical fader ───────────────────────────────────────────── */
+/* ── Vertical fader — FIXED: uses e.currentTarget for pointer capture ── */
 function VerticalFader({ value, onChange, color, min = 0, max = 1.5 }: {
   value: number; onChange: (v: number) => void; color: string; min?: number; max?: number;
 }) {
   const trackRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
+
   const updateFromY = useCallback((clientY: number) => {
     const el = trackRef.current; if (!el) return;
     const rect = el.getBoundingClientRect();
     onChange(min + Math.max(0, Math.min(1, 1 - (clientY - rect.top) / rect.height)) * (max - min));
   }, [onChange, min, max]);
+
   const pct = ((value - min) / (max - min)) * 100;
 
   return (
-    <div ref={trackRef} className="relative w-8 flex justify-center"
-      style={{ height: 160, touchAction: 'none', userSelect: 'none', cursor: 'pointer' }}
-      onPointerDown={(e) => { e.stopPropagation(); isDragging.current = true; (e.target as HTMLElement).setPointerCapture(e.pointerId); updateFromY(e.clientY); }}
-      onPointerMove={(e) => { if (!isDragging.current) return; e.stopPropagation(); updateFromY(e.clientY); }}
-      onPointerUp={(e) => { isDragging.current = false; try { (e.target as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* ok */ } }}
-      onPointerCancel={(e) => { isDragging.current = false; try { (e.target as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* ok */ } }}>
+    <div
+      ref={trackRef}
+      className="relative w-8 flex justify-center"
+      style={{ height: 160, touchAction: 'none', userSelect: 'none', cursor: 'ns-resize' }}
+      onPointerDown={(e) => {
+        e.stopPropagation();
+        isDragging.current = true;
+        e.currentTarget.setPointerCapture(e.pointerId); // ← fixed: currentTarget not target
+        updateFromY(e.clientY);
+      }}
+      onPointerMove={(e) => {
+        if (!isDragging.current) return;
+        e.stopPropagation();
+        updateFromY(e.clientY);
+      }}
+      onPointerUp={(e) => {
+        isDragging.current = false;
+        e.currentTarget.releasePointerCapture(e.pointerId); // ← fixed
+      }}
+      onPointerCancel={(e) => {
+        isDragging.current = false;
+        e.currentTarget.releasePointerCapture(e.pointerId); // ← fixed
+      }}>
+      {/* Rail */}
       <div className="absolute top-1 bottom-1 w-0.5 bg-gray-200 rounded-full">
-        {[0, 25, 50, 75, 100].map((p) => <div key={p} className="absolute w-2 h-px bg-gray-300" style={{ top: `${p}%`, left: -3 }} />)}
+        {[0, 25, 50, 75, 100].map((p) => (
+          <div key={p} className="absolute w-2 h-px bg-gray-300" style={{ top: `${p}%`, left: -3 }} />
+        ))}
       </div>
-      <div className="absolute w-8 h-6 bg-white border border-gray-300 shadow-md rounded-md flex items-center justify-center pointer-events-none"
+      {/* Cap */}
+      <div
+        className="absolute w-8 h-6 bg-white border border-gray-300 shadow-md rounded-md flex items-center justify-center pointer-events-none"
         style={{ bottom: `calc(${pct}% - 12px)` }}>
         <div className="w-5 h-0.5 rounded-full" style={{ backgroundColor: color }} />
       </div>

@@ -61,7 +61,6 @@ function makeDefaultTracks(): Track[] {
     { id: '2', name: 'Host B',    type: 'mic',   color: defaultColors[1], volume: 1,   pan: 0, muted: false, soloed: false, armed: false, clips: [] },
     { id: '3', name: 'Interview', type: 'mic',   color: defaultColors[2], volume: 1,   pan: 0, muted: false, soloed: false, armed: false, clips: [] },
     { id: '4', name: 'Music Bed', type: 'music', color: defaultColors[3], volume: 0.8, pan: 0, muted: false, soloed: false, armed: false, clips: [] },
-    { id: '5', name: 'SFX',       type: 'sfx',   color: defaultColors[4], volume: 1,   pan: 0, muted: false, soloed: false, armed: false, clips: [] },
   ];
 }
 
