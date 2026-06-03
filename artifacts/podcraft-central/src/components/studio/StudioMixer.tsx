@@ -1,7 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  X, Minus, Rewind, Square, Play, Circle, FastForward, Music, Zap, Sparkles, Plus,
-} from 'lucide-react';
+import { X, Minus, Music, Zap, Sparkles, Plus, Trash2 } from 'lucide-react';
 import { useStudio, Track, TrackType } from '../../store/StudioContext';
 import { engine } from '../../utils/studioAudioEngine';
 import { LevelMeter } from './LevelMeter';
@@ -44,8 +42,7 @@ const TRACK_TYPES: { label: string; type: TrackType; icon: string; recordable: b
 /* ════════════════════════════════════════════════════════════════ */
 export function StudioMixer() {
   const {
-    tracks, addTrack, updateTrack, masterVolume, setMasterVolume,
-    isPlaying, isRecording, togglePlay, toggleRecord, stop,
+    tracks, addTrack, updateTrack, deleteTrack, masterVolume, setMasterVolume,
     mixerOpen, setMixerOpen,
   } = useStudio();
 
@@ -262,11 +259,16 @@ export function StudioMixer() {
       <div
         className={`h-10 bg-gray-50 border-b border-gray-200 flex items-center justify-between px-4 flex-shrink-0 ${dragging?'cursor-grabbing':'cursor-grab'}`}
         onPointerDown={onHeaderDown} style={{ touchAction:'none', userSelect:'none' }}>
-        <div className="flex items-center gap-2 pointer-events-none">
-          <div className="flex gap-0.5">{[0,1,2].map(i=><div key={i} className="w-1 h-1 rounded-full bg-gray-400"/>)}</div>
-          <span className="font-bold text-sm text-gray-800">Digital Mixer</span>
-          <span className="text-[10px] text-gray-400">{tracks.length} track{tracks.length!==1?'s':''}</span>
-          {isRecording && <span className="text-[10px] font-bold text-red-500 animate-pulse ml-1">● REC</span>}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 pointer-events-none">
+            <div className="flex gap-0.5">{[0,1,2].map(i=><div key={i} className="w-1 h-1 rounded-full bg-gray-400"/>)}</div>
+            <span className="font-bold text-sm text-gray-800">Digital Mixer</span>
+            <span className="text-[10px] text-gray-400">{tracks.length} track{tracks.length!==1?'s':''}</span>
+          </div>
+          <button onClick={()=>setShowAddTrack(true)} onPointerDown={e=>e.stopPropagation()}
+            className="flex items-center gap-1 px-2.5 h-6 rounded-lg border border-violet-300 bg-violet-50 text-violet-700 text-[10px] font-bold hover:bg-violet-100 transition-all">
+            <Plus className="w-3 h-3"/> Add Track
+          </button>
         </div>
         <div className="flex items-center gap-1.5">
           <span className="text-[10px] font-semibold text-violet-600 bg-violet-100 px-2 py-0.5 rounded-full">LIVE</span>
@@ -316,7 +318,7 @@ export function StudioMixer() {
           <div className="overflow-x-auto overflow-y-hidden flex-shrink-0" style={{ width: 346 }}>
             <div className="flex flex-row gap-2 px-3 py-3 h-full items-start" style={{ minWidth:'max-content' }}>
               {tracks.map(track => (
-                <MixerChannel key={track.id} track={track} updateTrack={updateTrack}
+                <MixerChannel key={track.id} track={track} updateTrack={updateTrack} deleteTrack={deleteTrack}
                   analyser={engine.getTrackAnalyser(track.id)??null}/>
               ))}
             </div>
@@ -388,8 +390,8 @@ export function StudioMixer() {
           <div className="flex-shrink-0 overflow-y-auto" style={{ width: 288 }}>
             <div className="px-3 py-3 flex flex-col gap-0">
 
-              {/* Music Bed pads */}
-              <PadSection icon={<Music className="w-3 h-3 text-blue-500"/>} label="Music Bed" color="text-blue-700">
+              {/* Loop pads (route through Music Bed bus) */}
+              <PadSection icon={<Music className="w-3 h-3 text-blue-500"/>} label="Loops" color="text-blue-700">
                 <div className="grid grid-cols-3 gap-1.5">
                   {pads.slice(0,6).map(pad=>(
                     <MusicPadButton key={pad.id} pad={pad} type="music"
@@ -400,8 +402,8 @@ export function StudioMixer() {
 
               <PadDivider/>
 
-              {/* SFX pads */}
-              <PadSection icon={<Zap className="w-3 h-3 text-orange-500"/>} label="Sound Effects" color="text-orange-700">
+              {/* SFX one-shot pads (route through SFX bus) */}
+              <PadSection icon={<Zap className="w-3 h-3 text-orange-500"/>} label="Sounds" color="text-orange-700">
                 <div className="grid grid-cols-3 gap-1.5">
                   {pads.slice(6,12).map(pad=>(
                     <MusicPadButton key={pad.id} pad={pad} type="sfx"
@@ -427,44 +429,6 @@ export function StudioMixer() {
         </div>
       )}
 
-      {/* ── Transport dock ─────────────────────────────────────── */}
-      <div className="border-t border-gray-100 bg-gray-50 px-4 py-2.5 flex items-center justify-between flex-shrink-0">
-        {/* Add Track button */}
-        <button onClick={()=>setShowAddTrack(true)} onPointerDown={e=>e.stopPropagation()}
-          className="flex items-center gap-1.5 px-3 h-9 rounded-lg border border-violet-300 bg-violet-50 text-violet-700 text-xs font-bold hover:bg-violet-100 transition-all">
-          <Plus className="w-3.5 h-3.5"/> Add Track
-        </button>
-
-        {/* Transport */}
-        <div className="flex items-center gap-2">
-          <button onClick={stop}        onPointerDown={e=>e.stopPropagation()} title="Rewind"
-            className="w-10 h-10 flex items-center justify-center rounded-full bg-white border border-gray-200 text-gray-600 hover:bg-gray-100 shadow-sm">
-            <Rewind className="w-4 h-4"/>
-          </button>
-          <button onClick={stop}        onPointerDown={e=>e.stopPropagation()} title="Stop"
-            className="w-10 h-10 flex items-center justify-center rounded-full bg-white border border-gray-200 text-gray-700 hover:bg-gray-100 shadow-sm">
-            <Square className="w-4 h-4 fill-current"/>
-          </button>
-          <button onClick={togglePlay}  onPointerDown={e=>e.stopPropagation()} title={isPlaying?'Pause':'Play'}
-            className={`w-12 h-12 flex items-center justify-center rounded-full shadow-md border-2 transition-all ${isPlaying?'bg-green-500 border-green-500 text-white':'bg-green-50 border-green-400 text-green-600 hover:bg-green-100'}`}>
-            <Play className="w-5 h-5 fill-current ml-0.5"/>
-          </button>
-          <button onClick={toggleRecord} onPointerDown={e=>e.stopPropagation()} title={isRecording?'Stop Recording':'Record (arms required)'}
-            className={`w-12 h-12 flex items-center justify-center rounded-full shadow-md border-2 transition-all ${isRecording?'bg-red-500 border-red-500 text-white animate-pulse':'bg-red-50 border-red-400 text-red-600 hover:bg-red-100'}`}>
-            <Circle className="w-5 h-5 fill-current"/>
-          </button>
-          <button onPointerDown={e=>e.stopPropagation()} title="Fast Forward"
-            className="w-10 h-10 flex items-center justify-center rounded-full bg-white border border-gray-200 text-gray-600 hover:bg-gray-100 shadow-sm">
-            <FastForward className="w-4 h-4"/>
-          </button>
-        </div>
-
-        <div className="text-[10px] text-gray-400 text-right leading-tight">
-          {tracks.filter(t=>t.armed).length > 0
-            ? <span className="text-red-500 font-bold">{tracks.filter(t=>t.armed).length} track{tracks.filter(t=>t.armed).length!==1?'s':''} armed</span>
-            : <span>No tracks armed<br/>ARM a track to record</span>}
-        </div>
-      </div>
 
       {/* ── Add Track Modal ────────────────────────────────────── */}
       {showAddTrack && (
@@ -540,12 +504,31 @@ function AddTrackModal({ onAdd, onClose }: { onAdd: (type: TrackType, name: stri
 }
 
 /* ── MixerChannel (scrollable track strip item) ──────────────────── */
-function MixerChannel({ track, updateTrack, analyser }: { track: Track; updateTrack: (id:string,u:Partial<Track>)=>void; analyser: AnalyserNode|null }) {
+function MixerChannel({ track, updateTrack, deleteTrack, analyser }: {
+  track: Track;
+  updateTrack: (id:string, u:Partial<Track>) => void;
+  deleteTrack: (id:string) => void;
+  analyser: AnalyserNode|null;
+}) {
+  const [hovered, setHovered] = useState(false);
   const isRecordable = track.type === 'mic';
   const db = ((track.volume-1)*12).toFixed(1);
   return (
-    <div className="flex flex-col items-center gap-1.5 flex-shrink-0" style={{ width: 64 }}>
-      <span className="text-[9px] font-bold text-gray-800 truncate w-full text-center leading-tight" title={track.name}>{track.name}</span>
+    <div className="flex flex-col items-center gap-1.5 flex-shrink-0 relative" style={{ width: 64 }}
+      onMouseEnter={()=>setHovered(true)} onMouseLeave={()=>setHovered(false)}>
+      {/* Track name + remove button */}
+      <div className="relative w-full flex items-center justify-center">
+        <span className="text-[9px] font-bold text-gray-800 truncate text-center leading-tight pr-3" title={track.name}>{track.name}</span>
+        {hovered && (
+          <button
+            onPointerDown={e=>e.stopPropagation()}
+            onClick={()=>{ if(window.confirm(`Remove track "${track.name}"?`)) deleteTrack(track.id); }}
+            title="Remove track"
+            className="absolute right-0 top-0 w-4 h-4 flex items-center justify-center rounded-full bg-red-100 text-red-500 hover:bg-red-500 hover:text-white transition-all">
+            <Trash2 className="w-2.5 h-2.5"/>
+          </button>
+        )}
+      </div>
       <div className="flex gap-1">
         <button onPointerDown={e=>e.stopPropagation()} onClick={()=>updateTrack(track.id,{muted:!track.muted})}
           className={`w-7 h-5 rounded text-[9px] font-bold ${track.muted?'bg-red-500 text-white':'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>M</button>
