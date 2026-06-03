@@ -41,6 +41,7 @@ export function StudioMixer() {
   const {
     tracks, addTrack, updateTrack, deleteTrack, applyTrackPreset,
     masterVolume, setMasterVolume,
+    isRecording,
     mixerOpen, setMixerOpen,
     mixerDocked, setMixerDocked,
     setAudioSetupDone,
@@ -279,14 +280,27 @@ export function StudioMixer() {
 
       {/* Right: LIVE badge + dock + minimize + 3-dot */}
       <div className="flex items-center gap-1.5">
-        <span className="text-[10px] font-semibold text-violet-600 bg-violet-100 px-2 py-0.5 rounded-full">LIVE</span>
+        {/* LIVE indicator — connected to real engine state */}
+        {(() => {
+          const micArmed = tracks.some(t => t.type === 'mic' && t.armed);
+          const liveActive = isRecording || micArmed;
+          return (
+            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full transition-colors ${
+              liveActive
+                ? 'text-red-700 bg-red-100 animate-pulse'
+                : 'text-gray-400 bg-gray-100'
+            }`}>
+              {isRecording ? '● REC' : micArmed ? '● ARMED' : '○ LIVE'}
+            </span>
+          );
+        })()}
 
-        {/* Dock/Undock button */}
+        {/* Dock/Undock button — always shows correct label */}
         <button
           onClick={() => setMixerDocked(!mixerDocked)} onPointerDown={e=>e.stopPropagation()}
-          title={mixerDocked ? 'Undock mixer (float)' : 'Dock mixer'}
+          title={mixerDocked ? 'Undock mixer — float it above the layout' : 'Dock mixer — pin it below the script panel'}
           className="text-[9px] font-bold text-gray-500 hover:text-violet-600 bg-gray-100 hover:bg-violet-50 px-2 py-1 rounded border border-gray-200 hover:border-violet-300 transition-all">
-          {mixerDocked ? 'UD' : 'D'}
+          {mixerDocked ? 'UND' : 'D'}
         </button>
 
         {!mixerDocked && (
@@ -473,10 +487,14 @@ export function StudioMixer() {
   /* ── Render: docked vs floating ──────────────────────────────── */
   if (mixerDocked) {
     return (
-      <div className="w-full overflow-x-auto rounded-xl border border-gray-200 shadow-sm bg-white flex-shrink-0 select-none">
-        <div style={{ width: 1080, minWidth: 1080 }} className="flex flex-col">
-          {titleBar}
-          {body}
+      <div className="w-full rounded-xl border border-gray-200 shadow-sm bg-white flex-shrink-0 select-none flex flex-col">
+        {/* Title bar: full viewport width — UND button always visible, never scrolls away */}
+        {titleBar}
+        {/* Body: horizontal scroll only for the channel strips */}
+        <div className="overflow-x-auto">
+          <div style={{ width: 1080, minWidth: 1080 }}>
+            {body}
+          </div>
         </div>
         {addTrackModal}
         <input ref={fileInputRef} type="file" accept="audio/*" className="hidden" onChange={handleFileLoad}/>

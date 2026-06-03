@@ -1,12 +1,11 @@
 import React, { useState } from 'react';
-import { HelpCircle, Bell, ChevronDown, Check, Sliders } from 'lucide-react';
+import { HelpCircle, Bell, ChevronDown, Check } from 'lucide-react';
 import { useStudio } from '../../store/StudioContext';
 
 export function StudioTopBar() {
   const {
     isRecording, playheadPosition,
     inputDevices, selectedInputId, setSelectedInputId,
-    mixerOpen, setMixerOpen,
   } = useStudio();
   const [bpm, setBpm] = useState('120');
   const [deviceDropdownOpen, setDeviceDropdownOpen] = useState(false);
@@ -84,14 +83,6 @@ export function StudioTopBar() {
             className="bg-transparent w-10 text-sm font-bold focus:outline-none" />
           <span className="text-sm font-bold">BPM</span>
         </div>
-
-        <button
-          onClick={() => setMixerOpen(!mixerOpen)}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-            mixerOpen ? 'bg-violet-600 text-white hover:bg-violet-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-          }`}>
-          <Sliders className="w-4 h-4" /> Mixer
-        </button>
 
         <div className="flex items-center gap-3">
           <button className="text-gray-400 hover:text-gray-600"><HelpCircle className="w-5 h-5" /></button>
