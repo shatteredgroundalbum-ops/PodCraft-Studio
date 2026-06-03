@@ -3,19 +3,22 @@ export class AudioEngine {
   masterGain: GainNode | null = null;
   masterAnalyser: AnalyserNode | null = null;
   inputAnalyser: AnalyserNode | null = null;
+  inputGainNode: GainNode | null = null;
+
   trackGains: Map<string, GainNode> = new Map();
+  trackPanners: Map<string, StereoPannerNode> = new Map();
 
   mediaRecorder: MediaRecorder | null = null;
   recordedChunks: Blob[] = [];
   stream: MediaStream | null = null;
 
   sourceNodes: Map<string, AudioBufferSourceNode[]> = new Map();
-  startTime: number = 0;
-  pauseTime: number = 0;
+  startTime = 0;
 
   init() {
     if (this.ctx) return;
-    this.ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+    this.ctx = new (window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
     this.masterGain = this.ctx.createGain();
     this.masterAnalyser = this.ctx.createAnalyser();
     this.masterGain.connect(this.masterAnalyser);
@@ -24,14 +27,18 @@ export class AudioEngine {
 
   async requestInput(deviceId?: string) {
     try {
+      if (!this.ctx) this.init();
       const constraints = deviceId
         ? { audio: { deviceId: { exact: deviceId } } }
         : { audio: true };
       this.stream = await navigator.mediaDevices.getUserMedia(constraints);
       if (this.ctx) {
         const source = this.ctx.createMediaStreamSource(this.stream);
+        this.inputGainNode = this.ctx.createGain();
         this.inputAnalyser = this.ctx.createAnalyser();
-        source.connect(this.inputAnalyser);
+        source.connect(this.inputGainNode);
+        this.inputGainNode.connect(this.inputAnalyser);
+        // intentionally not connecting to destination — monitoring only
       }
       return true;
     } catch {
@@ -39,12 +46,17 @@ export class AudioEngine {
     }
   }
 
-  getTrackGain(trackId: string) {
-    if (!this.ctx || !this.masterGain) return null;
+  /** Returns (creating if needed) the gain node for a track.
+   *  Signal chain: source → gain → panner → masterGain */
+  getTrackGain(trackId: string): GainNode | undefined {
+    if (!this.ctx || !this.masterGain) return undefined;
     if (!this.trackGains.has(trackId)) {
       const gain = this.ctx.createGain();
-      gain.connect(this.masterGain);
+      const panner = this.ctx.createStereoPanner();
+      gain.connect(panner);
+      panner.connect(this.masterGain);
       this.trackGains.set(trackId, gain);
+      this.trackPanners.set(trackId, panner);
     }
     return this.trackGains.get(trackId);
   }
@@ -54,8 +66,19 @@ export class AudioEngine {
     if (gain) gain.gain.value = volume;
   }
 
+  setTrackPan(trackId: string, pan: number) {
+    // ensure the chain exists
+    this.getTrackGain(trackId);
+    const panner = this.trackPanners.get(trackId);
+    if (panner) panner.pan.value = Math.max(-1, Math.min(1, pan));
+  }
+
   setMasterVolume(volume: number) {
     if (this.masterGain) this.masterGain.gain.value = volume;
+  }
+
+  setInputGain(value: number) {
+    if (this.inputGainNode) this.inputGainNode.gain.value = value;
   }
 
   startRecording(onDataAvailable: (blob: Blob) => void) {
@@ -75,9 +98,8 @@ export class AudioEngine {
   stopRecording(): Promise<Blob> {
     return new Promise((resolve) => {
       if (!this.mediaRecorder) { resolve(new Blob()); return; }
-      this.mediaRecorder.onstop = () => {
+      this.mediaRecorder.onstop = () =>
         resolve(new Blob(this.recordedChunks, { type: 'audio/webm' }));
-      };
       this.mediaRecorder.stop();
     });
   }
@@ -85,10 +107,13 @@ export class AudioEngine {
   async decodeAudioData(blob: Blob): Promise<AudioBuffer | null> {
     if (!this.ctx) return null;
     const arrayBuffer = await blob.arrayBuffer();
-    return await this.ctx.decodeAudioData(arrayBuffer);
+    return this.ctx.decodeAudioData(arrayBuffer);
   }
 
-  play(tracks: { id: string; muted: boolean; clips: { startTime: number; duration: number; buffer: AudioBuffer }[] }[], offset = 0) {
+  play(
+    tracks: { id: string; muted: boolean; clips: { startTime: number; duration: number; buffer: AudioBuffer }[] }[],
+    offset = 0,
+  ) {
     if (!this.ctx) return;
     this.stop();
     this.startTime = this.ctx.currentTime - offset;
@@ -114,9 +139,9 @@ export class AudioEngine {
   }
 
   stop() {
-    this.sourceNodes.forEach((nodes) => {
-      nodes.forEach((node) => { try { node.stop(); } catch { /* already stopped */ } node.disconnect(); });
-    });
+    this.sourceNodes.forEach((nodes) =>
+      nodes.forEach((node) => { try { node.stop(); } catch { /* already stopped */ } node.disconnect(); }),
+    );
     this.sourceNodes.clear();
   }
 }

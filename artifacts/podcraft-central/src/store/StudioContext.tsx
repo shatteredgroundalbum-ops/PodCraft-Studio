@@ -16,6 +16,7 @@ export interface Track {
   type: TrackType;
   color: string;
   volume: number;
+  pan: number;      // -1 (full left) → 0 (center) → 1 (full right)
   muted: boolean;
   soloed: boolean;
   armed: boolean;
@@ -36,6 +37,8 @@ interface StudioContextType {
   stop: () => void;
   masterVolume: number;
   setMasterVolume: (vol: number) => void;
+  inputGainLevel: number;
+  setInputGainLevel: (v: number) => void;
   zoom: number;
   setZoom: (zoom: number) => void;
   inputDevices: MediaDeviceInfo[];
@@ -52,35 +55,39 @@ const trackPalette = [
   '#84cc16', '#f97316', '#10b981', '#64748b', '#a855f7', '#eab308',
 ];
 
+function makeDefaultTracks(): Track[] {
+  return [
+    { id: '1', name: 'Host A',    type: 'mic',   color: defaultColors[0], volume: 1,   pan: 0, muted: false, soloed: false, armed: true,  clips: [] },
+    { id: '2', name: 'Host B',    type: 'mic',   color: defaultColors[1], volume: 1,   pan: 0, muted: false, soloed: false, armed: false, clips: [] },
+    { id: '3', name: 'Interview', type: 'mic',   color: defaultColors[2], volume: 1,   pan: 0, muted: false, soloed: false, armed: false, clips: [] },
+    { id: '4', name: 'Music Bed', type: 'music', color: defaultColors[3], volume: 0.8, pan: 0, muted: false, soloed: false, armed: false, clips: [] },
+    { id: '5', name: 'SFX',       type: 'sfx',   color: defaultColors[4], volume: 1,   pan: 0, muted: false, soloed: false, armed: false, clips: [] },
+  ];
+}
+
 const StudioContext = createContext<StudioContextType | null>(null);
 
 export function StudioProvider({ children }: { children: React.ReactNode }) {
-  const [tracks, setTracks] = useState<Track[]>([
-    { id: '1', name: 'Host A',     type: 'mic',   color: defaultColors[0], volume: 1,   muted: false, soloed: false, armed: true,  clips: [] },
-    { id: '2', name: 'Host B',     type: 'mic',   color: defaultColors[1], volume: 1,   muted: false, soloed: false, armed: false, clips: [] },
-    { id: '3', name: 'Interview',  type: 'mic',   color: defaultColors[2], volume: 1,   muted: false, soloed: false, armed: false, clips: [] },
-    { id: '4', name: 'Music Bed',  type: 'music', color: defaultColors[3], volume: 0.8, muted: false, soloed: false, armed: false, clips: [] },
-    { id: '5', name: 'SFX',        type: 'sfx',   color: defaultColors[4], volume: 1,   muted: false, soloed: false, armed: false, clips: [] },
-  ]);
-
+  const [tracks, setTracks] = useState<Track[]>(makeDefaultTracks);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [playheadPosition, setPlayheadPosition] = useState(0);
-  const [masterVolume, setMasterVolume] = useState(1);
+  const [masterVolume, setMasterVolumeState] = useState(1);
+  const [inputGainLevel, setInputGainLevelState] = useState(0.8);
   const [zoom, setZoom] = useState(50);
   const [mixerOpen, setMixerOpen] = useState(true);
   const [inputDevices, setInputDevices] = useState<MediaDeviceInfo[]>([]);
-  const [selectedInputId, setSelectedInputId] = useState<string>('');
+  const [selectedInputId, setSelectedInputId] = useState('');
 
   const timerRef = useRef<number | null>(null);
-  const lastTimeRef = useRef<number>(0);
-  const recordStartTimeRef = useRef<number>(0);
+  const lastTimeRef = useRef(0);
+  const recordStartRef = useRef(0);
 
   useEffect(() => {
     navigator.mediaDevices.enumerateDevices().then((devices) => {
-      const audioInputs = devices.filter((d) => d.kind === 'audioinput');
-      setInputDevices(audioInputs);
-      if (audioInputs.length > 0) setSelectedInputId(audioInputs[0].deviceId);
+      const inputs = devices.filter((d) => d.kind === 'audioinput');
+      setInputDevices(inputs);
+      if (inputs.length > 0) setSelectedInputId(inputs[0].deviceId);
     });
   }, []);
 
@@ -90,46 +97,52 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
 
   const addTrack = (type: TrackType) => {
     if (tracks.length >= 32) return;
-    setTracks([...tracks, {
-      id: Math.random().toString(36).substr(2, 9),
-      name: `Track ${tracks.length + 1}`,
-      type,
-      color: trackPalette[tracks.length % trackPalette.length],
-      volume: 1, muted: false, soloed: false, armed: false, clips: [],
-    }]);
+    setTracks((prev) => [
+      ...prev,
+      {
+        id: Math.random().toString(36).substr(2, 9),
+        name: `Track ${prev.length + 1}`,
+        type,
+        color: trackPalette[prev.length % trackPalette.length],
+        volume: 1, pan: 0, muted: false, soloed: false, armed: false, clips: [],
+      },
+    ]);
   };
 
   const updateTrack = (id: string, updates: Partial<Track>) => {
-    setTracks(tracks.map((t) => {
-      if (t.id !== id) return t;
-      const updated = { ...t, ...updates };
-      if (updates.volume !== undefined) engine.setTrackVolume(id, updates.volume);
-      return updated;
-    }));
+    setTracks((prev) =>
+      prev.map((t) => {
+        if (t.id !== id) return t;
+        if (updates.volume !== undefined) engine.setTrackVolume(id, updates.volume);
+        if (updates.pan !== undefined) engine.setTrackPan(id, updates.pan);
+        return { ...t, ...updates };
+      }),
+    );
   };
 
-  const deleteTrack = (id: string) => setTracks(tracks.filter((t) => t.id !== id));
+  const deleteTrack = (id: string) => setTracks((prev) => prev.filter((t) => t.id !== id));
 
-  const updatePlayhead = useCallback(() => {
-    if (!isPlaying && !isRecording) return;
+  const tick = useCallback(() => {
     const now = performance.now();
     const delta = (now - lastTimeRef.current) / 1000;
     lastTimeRef.current = now;
     setPlayheadPosition((prev) => prev + delta);
-    timerRef.current = requestAnimationFrame(updatePlayhead);
-  }, [isPlaying, isRecording]);
+    timerRef.current = requestAnimationFrame(tick);
+  }, []);
+
+  const stopTimer = () => { if (timerRef.current) { cancelAnimationFrame(timerRef.current); timerRef.current = null; } };
+  const startTimer = () => { lastTimeRef.current = performance.now(); timerRef.current = requestAnimationFrame(tick); };
 
   const togglePlay = () => {
     engine.init();
     if (isPlaying) {
       setIsPlaying(false);
       engine.stop();
-      if (timerRef.current) cancelAnimationFrame(timerRef.current);
+      stopTimer();
     } else {
       setIsPlaying(true);
-      lastTimeRef.current = performance.now();
       engine.play(tracks, playheadPosition);
-      timerRef.current = requestAnimationFrame(updatePlayhead);
+      startTimer();
     }
   };
 
@@ -137,39 +150,52 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     engine.init();
     if (isRecording) {
       setIsRecording(false);
+      stopTimer();
       const blob = await engine.stopRecording();
-      if (timerRef.current) cancelAnimationFrame(timerRef.current);
       const buffer = await engine.decodeAudioData(blob);
       if (buffer) {
         const newClip: AudioClip = {
           id: Math.random().toString(36).substr(2, 9),
-          buffer, startTime: recordStartTimeRef.current, duration: buffer.duration,
+          buffer, startTime: recordStartRef.current, duration: buffer.duration,
         };
         setTracks((prev) => prev.map((t) => t.armed ? { ...t, clips: [...t.clips, newClip] } : t));
       }
     } else {
       const armedTracks = tracks.filter((t) => t.armed);
       if (armedTracks.length === 0) { alert('Please arm at least one track to record.'); return; }
+      // ensure mic input is initialized
+      if (!engine.stream) await engine.requestInput(selectedInputId || undefined);
       const started = engine.startRecording(() => {});
       if (started) {
         setIsRecording(true);
-        recordStartTimeRef.current = playheadPosition;
-        lastTimeRef.current = performance.now();
-        timerRef.current = requestAnimationFrame(updatePlayhead);
+        recordStartRef.current = playheadPosition;
+        startTimer();
+      } else {
+        alert('Could not access microphone. Please allow microphone permission and try again.');
       }
     }
   };
 
   const stop = () => {
-    if (isPlaying) { setIsPlaying(false); engine.stop(); }
-    if (isRecording) toggleRecord();
+    setIsPlaying(false);
+    setIsRecording(false);
     setPlayheadPosition(0);
-    if (timerRef.current) cancelAnimationFrame(timerRef.current);
+    engine.stop();
+    stopTimer();
+    // also stop any active MediaRecorder
+    if (engine.mediaRecorder && engine.mediaRecorder.state !== 'inactive') {
+      engine.mediaRecorder.stop();
+    }
   };
 
-  const handleSetMasterVolume = (vol: number) => {
-    setMasterVolume(vol);
+  const setMasterVolume = (vol: number) => {
+    setMasterVolumeState(vol);
     engine.setMasterVolume(vol);
+  };
+
+  const setInputGainLevel = (v: number) => {
+    setInputGainLevelState(v);
+    engine.setInputGain(v);
   };
 
   return (
@@ -177,7 +203,8 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
       tracks, addTrack, updateTrack, deleteTrack,
       isPlaying, isRecording, playheadPosition, setPlayheadPosition,
       togglePlay, toggleRecord, stop,
-      masterVolume, setMasterVolume: handleSetMasterVolume,
+      masterVolume, setMasterVolume,
+      inputGainLevel, setInputGainLevel,
       zoom, setZoom,
       inputDevices, selectedInputId, setSelectedInputId,
       mixerOpen, setMixerOpen,
