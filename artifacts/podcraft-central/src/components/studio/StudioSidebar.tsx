@@ -2,7 +2,7 @@ import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
   Home, Folder, Calendar, CheckSquare, LayoutTemplate,
-  Image, Mic, Sparkles, BarChart2, Users, Settings,
+  Image, Mic, Sparkles, BarChart2, Users,
 } from 'lucide-react';
 import { usePWAInstall } from '../../hooks/usePWAInstall';
 import { DownloadIcon } from 'lucide-react';
@@ -87,13 +87,6 @@ export function StudioSidebar() {
             {isInstalling ? 'Installing…' : 'Install App'}
           </button>
         )}
-
-        <Link
-          to="/settings"
-          className="flex items-center gap-3 px-3 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 w-full rounded-lg hover:bg-gray-50 transition-colors">
-          <Settings className="w-5 h-5 text-gray-400" />
-          Settings
-        </Link>
 
         <div className="bg-gray-50 rounded-lg p-3 border border-gray-100">
           <div className="flex items-center gap-2 mb-1">

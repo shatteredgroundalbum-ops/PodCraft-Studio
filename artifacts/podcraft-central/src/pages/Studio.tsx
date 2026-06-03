@@ -7,7 +7,6 @@ import { StudioTopBar } from '../components/studio/StudioTopBar';
 import { StudioScriptPanel } from '../components/studio/StudioScriptPanel';
 import { StudioRecorder } from '../components/studio/StudioRecorder';
 import { StudioAIPanel } from '../components/studio/StudioAIPanel';
-import { StudioTransport } from '../components/studio/StudioTransport';
 import { StudioMixer } from '../components/studio/StudioMixer';
 
 function StudioPage() {
@@ -86,7 +85,6 @@ function StudioPage() {
           <StudioAIPanel width={aiWidth} collapsed={aiCollapsed} onToggleCollapsed={toggleAiCollapsed} />
         </div>
 
-        <StudioTransport />
       </div>
 
       <StudioMixer />
