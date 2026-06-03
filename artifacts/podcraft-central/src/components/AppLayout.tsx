@@ -8,7 +8,7 @@ import {
   ImageIcon, BarChartIcon, UsersIcon, SettingsIcon, PlusIcon, HelpCircleIcon,
   BellIcon, ChevronDownIcon, MicIcon, LogOutIcon, UserIcon, ShieldIcon,
   PaletteIcon, BookOpenIcon, ScaleIcon, LifeBuoyIcon, InfoIcon, SparklesIcon,
-  DownloadIcon,
+  DownloadIcon, BrainCircuitIcon,
 } from 'lucide-react';
 
 interface AppLayoutProps {
@@ -175,6 +175,9 @@ export function AppLayout({ children, title, breadcrumbs, rightHeader }: AppLayo
                       </Link>
                       <Link to="/settings" onClick={() => setIsUserMenuOpen(false)} className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
                         <SettingsIcon className="w-4 h-4 text-gray-400" /> Settings
+                      </Link>
+                      <Link to="/ai-settings" onClick={() => setIsUserMenuOpen(false)} className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                        <BrainCircuitIcon className="w-4 h-4 text-gray-400" /> AI
                       </Link>
                       <div className="border-t border-gray-100 my-1"></div>
                       <Link to="/knowledge-base" onClick={() => setIsUserMenuOpen(false)} className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">

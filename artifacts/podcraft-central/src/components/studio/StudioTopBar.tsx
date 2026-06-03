@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { HelpCircle, Bell, ChevronDown, LogOut, Settings, User } from 'lucide-react';
+import { HelpCircle, Bell, ChevronDown, LogOut, Settings, User, BrainCircuit } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../store/AuthStore';
 
@@ -67,6 +67,14 @@ export function StudioTopBar() {
             >
               <User className="w-4 h-4 text-gray-400 shrink-0" />
               Profile
+            </button>
+
+            <button
+              onClick={() => { setMenuOpen(false); navigate('/ai-settings'); }}
+              className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors text-left"
+            >
+              <BrainCircuit className="w-4 h-4 text-gray-400 shrink-0" />
+              AI
             </button>
 
             <button

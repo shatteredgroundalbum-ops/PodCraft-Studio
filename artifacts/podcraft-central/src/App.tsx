@@ -25,6 +25,7 @@ import { About } from './pages/About';
 import { KnowledgeBase } from './pages/KnowledgeBase';
 import { Legal } from './pages/Legal';
 import { AIProducer } from './pages/AIProducer';
+import { AISettings } from './pages/AISettings';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
@@ -75,6 +76,7 @@ function AppRoutes() {
       <Route path="/knowledge-base/*" element={<ProtectedRoute><KnowledgeBase /></ProtectedRoute>} />
       <Route path="/legal/*" element={<ProtectedRoute><Legal /></ProtectedRoute>} />
       <Route path="/ai-producer" element={<ProtectedRoute><AIProducer /></ProtectedRoute>} />
+      <Route path="/ai-settings" element={<ProtectedRoute><AISettings /></ProtectedRoute>} />
 
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
