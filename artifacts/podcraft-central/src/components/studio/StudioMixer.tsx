@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { X, Minus, Music, Zap, Sparkles, Plus, Trash2, MoreHorizontal, Settings } from 'lucide-react';
+import { X, Minus, Music, Zap, Sparkles, Plus, Trash2, MoreHorizontal, Settings, ChevronDown, Check } from 'lucide-react';
 import { useStudio, Track, TrackType, TRACK_PRESETS } from '../../store/StudioContext';
 import { engine } from '../../utils/studioAudioEngine';
 import { LevelMeter } from './LevelMeter';
@@ -42,6 +42,8 @@ export function StudioMixer() {
     tracks, addTrack, updateTrack, deleteTrack, applyTrackPreset,
     masterVolume, setMasterVolume,
     isRecording,
+    playheadPosition,
+    inputDevices, selectedInputId, setSelectedInputId,
     mixerOpen, setMixerOpen,
     mixerDocked, setMixerDocked,
     setAudioSetupDone,
@@ -120,6 +122,10 @@ export function StudioMixer() {
 
   /* Add Track modal */
   const [showAddTrack, setShowAddTrack] = useState(false);
+
+  /* Status bar state — device dropdown + BPM (moved from StudioTopBar) */
+  const [bpm,              setBpm]              = useState('120');
+  const [statusDeviceOpen, setStatusDeviceOpen] = useState(false);
 
   /* Duck refs */
   const musicBedVolRef   = useRef(musicBedVol);
@@ -259,6 +265,62 @@ export function StudioMixer() {
   // Docked: always visible. Floating: respect mixerOpen.
   if (!mixerDocked && !mixerOpen) return null;
 
+  /* ── Helpers ─────────────────────────────────────────────────── */
+  const formatTime = (s: number) => {
+    const m = Math.floor(s / 60), sec = Math.floor(s % 60), ms = Math.floor((s % 1) * 100);
+    return `${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}:${String(ms).padStart(2,'0')}`;
+  };
+  const selectedDevice = inputDevices.find(d => d.deviceId === selectedInputId);
+
+  /* ── Status bar: device picker · timer · session · BPM ───────── */
+  const statusBar = (
+    <div
+      className="h-9 bg-white border-b border-gray-100 flex items-center justify-between px-3 flex-shrink-0 gap-4"
+      onPointerDown={e=>e.stopPropagation()}>
+      {/* Left group: device picker, timer, session */}
+      <div className="flex items-center gap-3 min-w-0">
+        {/* Device picker */}
+        <div className="relative flex-shrink-0">
+          <button onClick={()=>setStatusDeviceOpen(o=>!o)}
+            className="flex items-center gap-1 text-[10px] text-gray-700 font-semibold hover:text-violet-600 transition-colors">
+            <span className="text-[9px] text-gray-400 font-medium">IN</span>
+            <span className="ml-0.5 max-w-[110px] truncate">{selectedDevice?.label.replace(/\(.*\)/,'').trim() || 'No Device'}</span>
+            <ChevronDown className="w-2.5 h-2.5 text-gray-400 flex-shrink-0"/>
+          </button>
+          {statusDeviceOpen && (
+            <div className="absolute top-full left-0 mt-1 w-60 bg-white border border-gray-200 rounded-xl shadow-2xl py-1 z-[200]">
+              {inputDevices.length === 0 && (
+                <div className="px-3 py-2.5 text-[11px] text-gray-400 italic">No input devices found</div>
+              )}
+              {inputDevices.map(d => (
+                <button key={d.deviceId}
+                  onClick={()=>{setSelectedInputId(d.deviceId); setStatusDeviceOpen(false);}}
+                  className="w-full px-3 py-2 text-[11px] text-left text-gray-700 hover:bg-gray-50 flex items-center justify-between gap-2">
+                  <span className="truncate">{d.label || `Mic ${d.deviceId.slice(0,5)}`}</span>
+                  {d.deviceId === selectedInputId && <Check className="w-3 h-3 text-violet-500 flex-shrink-0"/>}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="w-px h-3.5 bg-gray-200 flex-shrink-0"/>
+        <span className="text-[10px] font-mono text-gray-700 flex-shrink-0">{formatTime(playheadPosition)}</span>
+        <div className="w-px h-3.5 bg-gray-200 flex-shrink-0"/>
+        <span className="text-[10px] text-gray-500 font-medium truncate max-w-[120px]">New Recording</span>
+      </div>
+      {/* Right: BPM */}
+      <div className="flex items-center gap-1 bg-violet-50 text-violet-600 px-2 py-0.5 rounded flex-shrink-0">
+        <svg className="w-2.5 h-2.5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+          <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+        </svg>
+        <input type="text" value={bpm} onChange={e=>setBpm(e.target.value)}
+          onPointerDown={e=>e.stopPropagation()}
+          className="bg-transparent w-7 text-[10px] font-bold focus:outline-none text-center"/>
+        <span className="text-[10px] font-bold">BPM</span>
+      </div>
+    </div>
+  );
+
   /* ── Inner body (shared between docked/floating) ─────────────── */
   const titleBar = (
     <div
@@ -343,29 +405,26 @@ export function StudioMixer() {
   const body = (
     <div className="flex overflow-hidden flex-shrink-0" style={{ height: 368 }}>
 
-      {/* ① Static: Input ──────────────────────────────────────── */}
-      <div className="flex-shrink-0 flex flex-col items-center gap-2 px-2 py-3 overflow-y-auto" style={{ width: 88 }}>
+      {/* ① Static: Input — source path, not a recordable track ─── */}
+      <div className="flex-shrink-0 flex flex-col items-center gap-2 px-2 py-3" style={{ width: 88 }}>
         <span className="text-[10px] font-bold text-gray-800 tracking-wide uppercase">Input</span>
-        {/* Trim */}
-        <div className="w-full">
-          <div className="flex justify-between items-center mb-0.5">
-            <span className="text-[7px] font-bold text-gray-400 uppercase">Trim</span>
-            <span className="text-[7px] font-mono text-gray-400">{(20*Math.log10(Math.max(micTrim,1e-7))).toFixed(1)}dB</span>
+
+        {/* Source display */}
+        <div className="w-full bg-gray-50 border border-gray-200 rounded-lg p-1.5 text-center">
+          <div className="text-[6px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">Source</div>
+          <div className="text-[8px] font-semibold text-gray-700 leading-tight w-full truncate px-0.5">
+            {selectedDevice?.label.replace(/\(.*\)/,'').trim() || '— No Device —'}
           </div>
-          <input type="range" min={0} max={2} step={0.01} value={micTrim}
-            onChange={e=>h.micTrim(parseFloat(e.target.value))}
-            onPointerDown={e=>e.stopPropagation()}
-            className="w-full h-1.5 accent-gray-500 cursor-pointer"/>
         </div>
-        {/* Pan */}
+
+        {/* Balance knob */}
+        <div className="text-[7px] font-bold text-gray-400 uppercase tracking-wider">Balance</div>
         <PanKnob value={micPan} onChange={h.micPan} color="#6b7280" size="sm"/>
-        {/* Channel fader + meter */}
-        <div className="flex gap-1 items-end">
-          <VerticalFader value={micGainVal} onChange={h.micGain} color="#374151" height={152}/>
-          <LevelMeter analyser={engine.micAnalyser} height={152} width={9}/>
-        </div>
-        <div className="w-full py-0.5 bg-gray-50 border border-gray-200 rounded text-center text-[9px] font-mono">
-          {((micGainVal-1)*12).toFixed(1)} dB
+
+        {/* Routing status */}
+        <div className="w-full bg-gray-50 border border-gray-200 rounded-lg p-1 text-center mt-1">
+          <div className="text-[6px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">Route</div>
+          <div className="text-[9px] text-green-600 font-bold">→ Bus</div>
         </div>
       </div>
 
@@ -490,6 +549,8 @@ export function StudioMixer() {
       <div className="w-full rounded-xl border border-gray-200 shadow-sm bg-white flex-shrink-0 select-none flex flex-col">
         {/* Title bar: full viewport width — UND button always visible, never scrolls away */}
         {titleBar}
+        {/* Status bar: device picker, timer, session name, BPM */}
+        {statusBar}
         {/* Body: horizontal scroll only for the channel strips */}
         <div className="overflow-x-auto">
           <div style={{ width: 1080, minWidth: 1080 }}>
@@ -507,6 +568,7 @@ export function StudioMixer() {
       className="fixed bg-white rounded-xl shadow-2xl border border-gray-200 flex flex-col z-[100] overflow-hidden select-none"
       style={{ left: pos.x, top: pos.y, width: 1080, touchAction: 'none' }}>
       {titleBar}
+      {statusBar}
       {!minimized && body}
       {addTrackModal}
       <input ref={fileInputRef} type="file" accept="audio/*" className="hidden" onChange={handleFileLoad}/>
