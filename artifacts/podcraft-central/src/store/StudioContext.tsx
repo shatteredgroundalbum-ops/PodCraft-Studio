@@ -3,6 +3,14 @@ import { engine } from '../utils/studioAudioEngine';
 
 export type TrackType = 'mic' | 'music' | 'sfx';
 
+export const MUSIC_BED_TRACK_ID = '__music_bed__';
+export const SFX_TRACK_ID        = '__sfx__';
+
+const PERMANENT_TRACKS: Track[] = [
+  { id: MUSIC_BED_TRACK_ID, name: 'Music Bed', type: 'music', color: '#3b82f6', volume: 0.8, pan: 0, muted: false, soloed: false, armed: false, preset: 'Custom', clips: [] },
+  { id: SFX_TRACK_ID,        name: 'SFX',       type: 'sfx',   color: '#f97316', volume: 0.8, pan: 0, muted: false, soloed: false, armed: false, preset: 'Custom', clips: [] },
+];
+
 export interface AudioClip {
   id: string;
   buffer: AudioBuffer;
@@ -61,6 +69,7 @@ interface StudioContextType {
   updateTrack: (id: string, updates: Partial<Track>) => void;
   deleteTrack: (id: string) => void;
   applyTrackPreset: (trackId: string, preset: string) => void;
+  addPadClip: (trackId: string, buffer: AudioBuffer, startTime: number) => void;
   isPlaying: boolean;
   isRecording: boolean;
   playheadPosition: number;
@@ -97,7 +106,7 @@ const trackPalette = [
 const StudioContext = createContext<StudioContextType | null>(null);
 
 export function StudioProvider({ children }: { children: React.ReactNode }) {
-  const [tracks, setTracks] = useState<Track[]>([]);
+  const [tracks, setTracks] = useState<Track[]>(() => PERMANENT_TRACKS.map(t => ({ ...t })));
   const [isPlaying, setIsPlaying] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [playheadPosition, setPlayheadPosition] = useState(0);
@@ -163,7 +172,20 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     );
   };
 
-  const deleteTrack = (id: string) => setTracks((prev) => prev.filter((t) => t.id !== id));
+  const deleteTrack = (id: string) => {
+    if (id === MUSIC_BED_TRACK_ID || id === SFX_TRACK_ID) return;
+    setTracks((prev) => prev.filter((t) => t.id !== id));
+  };
+
+  const addPadClip = useCallback((trackId: string, buffer: AudioBuffer, startTime: number) => {
+    const newClip: AudioClip = {
+      id: Math.random().toString(36).substr(2, 9),
+      buffer,
+      startTime,
+      duration: buffer.duration,
+    };
+    setTracks(prev => prev.map(t => t.id === trackId ? { ...t, clips: [...t.clips, newClip] } : t));
+  }, []);
 
   const applyTrackPreset = useCallback((trackId: string, presetName: string) => {
     const p = TRACK_PRESETS[presetName];
@@ -275,7 +297,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <StudioContext.Provider value={{
-      tracks, addTrack, updateTrack, deleteTrack, applyTrackPreset,
+      tracks, addTrack, updateTrack, deleteTrack, applyTrackPreset, addPadClip,
       isPlaying, isRecording, playheadPosition, setPlayheadPosition,
       togglePlay, toggleRecord, stop,
       masterVolume, setMasterVolume,

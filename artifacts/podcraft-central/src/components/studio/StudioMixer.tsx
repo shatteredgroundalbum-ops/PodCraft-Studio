@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Music, Zap, Sparkles, Plus, Trash2, MoreHorizontal, Settings, ChevronDown, Check, Rewind, Square, Play, Circle, FastForward } from 'lucide-react';
-import { useStudio, Track, TrackType, TRACK_PRESETS } from '../../store/StudioContext';
+import { useStudio, Track, TrackType, TRACK_PRESETS, MUSIC_BED_TRACK_ID, SFX_TRACK_ID } from '../../store/StudioContext';
 import { engine } from '../../utils/studioAudioEngine';
 import { LevelMeter } from './LevelMeter';
 
@@ -39,7 +39,7 @@ const TRACK_TYPES: { label: string; type: TrackType; icon: string }[] = [
 /* ════════════════════════════════════════════════════════════════ */
 export function StudioMixer() {
   const {
-    tracks, addTrack, updateTrack, deleteTrack, applyTrackPreset,
+    tracks, addTrack, updateTrack, deleteTrack, applyTrackPreset, addPadClip,
     masterVolume, setMasterVolume,
     isPlaying, isRecording, togglePlay, toggleRecord, stop,
     playheadPosition,
@@ -217,7 +217,8 @@ export function StudioMixer() {
     if (!pad.buffer) { loadingPad.current = pad.id; fileInputRef.current?.click(); return; }
     engine.init();
     if (!engine.ctx) return;
-    const bus = pad.id < 6 ? engine.musicBusGain : engine.sfxBusGain;
+    const isMusicPad = pad.id < 6;
+    const bus = isMusicPad ? engine.musicBusGain : engine.sfxBusGain;
     if (!bus) return;
     const ex = activeSrc.current.get(pad.id);
     if (ex) { try { ex.stop(); } catch { /**/ } activeSrc.current.delete(pad.id); }
@@ -226,6 +227,8 @@ export function StudioMixer() {
     src.onended = () => { activeSrc.current.delete(pad.id); setPads(p=>p.map(pp=>pp.id===pad.id?{...pp,playing:false}:pp)); };
     activeSrc.current.set(pad.id, src);
     setPads(p=>p.map(pp=>pp.id===pad.id?{...pp,playing:true}:pp));
+    /* Place a clip on the permanent Music Bed or SFX track at the current playhead */
+    addPadClip(isMusicPad ? MUSIC_BED_TRACK_ID : SFX_TRACK_ID, pad.buffer, playheadPosition);
   };
 
   const handleFileLoad = async (e: React.ChangeEvent<HTMLInputElement>) => {
