@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { X, Minus, Music, Zap, Sparkles, Plus, Trash2, MoreHorizontal, Settings, ChevronDown, Check } from 'lucide-react';
+import { Music, Zap, Sparkles, Plus, Trash2, MoreHorizontal, Settings, ChevronDown, Check, Rewind, Square, Play, Circle, FastForward } from 'lucide-react';
 import { useStudio, Track, TrackType, TRACK_PRESETS } from '../../store/StudioContext';
 import { engine } from '../../utils/studioAudioEngine';
 import { LevelMeter } from './LevelMeter';
@@ -41,10 +41,9 @@ export function StudioMixer() {
   const {
     tracks, addTrack, updateTrack, deleteTrack, applyTrackPreset,
     masterVolume, setMasterVolume,
-    isRecording,
+    isPlaying, isRecording, togglePlay, toggleRecord, stop,
     playheadPosition,
     inputDevices, selectedInputId, setSelectedInputId,
-    mixerOpen, setMixerOpen,
     mixerDocked, setMixerDocked,
     setAudioSetupDone,
     roomProfile,
@@ -52,7 +51,7 @@ export function StudioMixer() {
 
   /* ── Floating drag ──────────────────────────────────────────── */
   const [pos,      setPos]      = useState(() => ({ x: Math.max(20, window.innerWidth - 1100), y: 72 }));
-  const [minimized,setMinimized]= useState(false);
+
   const [dragging, setDragging] = useState(false);
   const dragRef = useRef<{ active: boolean; ox: number; oy: number }>({ active: false, ox: 0, oy: 0 });
 
@@ -262,8 +261,7 @@ export function StudioMixer() {
   const micTracks = tracks.filter(t => t.type === 'mic');
 
   /* ── Visibility logic ───────────────────────────────────────── */
-  // Docked: always visible. Floating: respect mixerOpen.
-  if (!mixerDocked && !mixerOpen) return null;
+  // Mixer always renders — docked shows inline, floating shows as position:fixed overlay
 
   /* ── Helpers ─────────────────────────────────────────────────── */
   const formatTime = (s: number) => {
@@ -272,29 +270,25 @@ export function StudioMixer() {
   };
   const selectedDevice = inputDevices.find(d => d.deviceId === selectedInputId);
 
-  /* ── Status bar: device picker · timer · session · BPM ───────── */
+  /* ── Transport + Status bar: device · timer | transport | BPM ── */
   const statusBar = (
     <div
-      className="h-9 bg-white border-b border-gray-100 flex items-center justify-between px-3 flex-shrink-0 gap-4"
+      className="h-10 bg-white border-b border-gray-100 flex items-center justify-between px-3 flex-shrink-0"
       onPointerDown={e=>e.stopPropagation()}>
-      {/* Left group: device picker, timer, session */}
-      <div className="flex items-center gap-3 min-w-0">
-        {/* Device picker */}
+      {/* Left: device picker · timer · session */}
+      <div className="flex items-center gap-2 min-w-0 flex-1">
         <div className="relative flex-shrink-0">
           <button onClick={()=>setStatusDeviceOpen(o=>!o)}
             className="flex items-center gap-1 text-[10px] text-gray-700 font-semibold hover:text-violet-600 transition-colors">
             <span className="text-[9px] text-gray-400 font-medium">IN</span>
-            <span className="ml-0.5 max-w-[110px] truncate">{selectedDevice?.label.replace(/\(.*\)/,'').trim() || 'No Device'}</span>
+            <span className="ml-0.5 max-w-[100px] truncate">{selectedDevice?.label.replace(/\(.*\)/,'').trim() || 'No Device'}</span>
             <ChevronDown className="w-2.5 h-2.5 text-gray-400 flex-shrink-0"/>
           </button>
           {statusDeviceOpen && (
             <div className="absolute top-full left-0 mt-1 w-60 bg-white border border-gray-200 rounded-xl shadow-2xl py-1 z-[200]">
-              {inputDevices.length === 0 && (
-                <div className="px-3 py-2.5 text-[11px] text-gray-400 italic">No input devices found</div>
-              )}
+              {inputDevices.length === 0 && <div className="px-3 py-2.5 text-[11px] text-gray-400 italic">No input devices found</div>}
               {inputDevices.map(d => (
-                <button key={d.deviceId}
-                  onClick={()=>{setSelectedInputId(d.deviceId); setStatusDeviceOpen(false);}}
+                <button key={d.deviceId} onClick={()=>{setSelectedInputId(d.deviceId); setStatusDeviceOpen(false);}}
                   className="w-full px-3 py-2 text-[11px] text-left text-gray-700 hover:bg-gray-50 flex items-center justify-between gap-2">
                   <span className="truncate">{d.label || `Mic ${d.deviceId.slice(0,5)}`}</span>
                   {d.deviceId === selectedInputId && <Check className="w-3 h-3 text-violet-500 flex-shrink-0"/>}
@@ -306,10 +300,39 @@ export function StudioMixer() {
         <div className="w-px h-3.5 bg-gray-200 flex-shrink-0"/>
         <span className="text-[10px] font-mono text-gray-700 flex-shrink-0">{formatTime(playheadPosition)}</span>
         <div className="w-px h-3.5 bg-gray-200 flex-shrink-0"/>
-        <span className="text-[10px] text-gray-500 font-medium truncate max-w-[120px]">New Recording</span>
+        <span className="text-[10px] text-gray-500 font-medium truncate max-w-[90px]">New Recording</span>
       </div>
+
+      {/* Center: Transport controls */}
+      <div className="flex items-center gap-1 flex-shrink-0 mx-3">
+        <button onClick={stop} title="Rewind"
+          className="w-7 h-7 flex items-center justify-center rounded-lg bg-gray-50 hover:bg-gray-100 text-gray-500 border border-gray-200 transition-colors">
+          <Rewind className="w-3 h-3"/>
+        </button>
+        <button onClick={stop} title="Stop"
+          className="w-7 h-7 flex items-center justify-center rounded-lg bg-gray-50 hover:bg-gray-100 text-gray-700 border border-gray-200 transition-colors">
+          <Square className="w-3 h-3 fill-current"/>
+        </button>
+        <button onClick={togglePlay} title={isPlaying ? 'Pause' : 'Play'}
+          className={`w-8 h-8 flex items-center justify-center rounded-lg border-2 transition-all ${
+            isPlaying ? 'bg-green-500 border-green-400 text-white' : 'bg-green-50 border-green-300 text-green-600 hover:bg-green-100'
+          }`}>
+          <Play className="w-3.5 h-3.5 fill-current ml-0.5"/>
+        </button>
+        <button onClick={toggleRecord} title={isRecording ? 'Stop Recording' : 'Record'}
+          className={`w-8 h-8 flex items-center justify-center rounded-lg border-2 transition-all ${
+            isRecording ? 'bg-red-500 border-red-400 text-white animate-pulse' : 'bg-red-50 border-red-300 text-red-600 hover:bg-red-100'
+          }`}>
+          <Circle className="w-3.5 h-3.5 fill-current"/>
+        </button>
+        <button title="Fast Forward"
+          className="w-7 h-7 flex items-center justify-center rounded-lg bg-gray-50 hover:bg-gray-100 text-gray-500 border border-gray-200 transition-colors">
+          <FastForward className="w-3 h-3"/>
+        </button>
+      </div>
+
       {/* Right: BPM */}
-      <div className="flex items-center gap-1 bg-violet-50 text-violet-600 px-2 py-0.5 rounded flex-shrink-0">
+      <div className="flex items-center gap-1 bg-violet-50 text-violet-600 px-2 py-0.5 rounded flex-shrink-0 flex-1 justify-end">
         <svg className="w-2.5 h-2.5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
           <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
         </svg>
@@ -365,12 +388,6 @@ export function StudioMixer() {
           {mixerDocked ? 'UND' : 'D'}
         </button>
 
-        {!mixerDocked && (
-          <button onClick={()=>setMinimized(!minimized)} onPointerDown={e=>e.stopPropagation()} className="text-gray-400 hover:text-gray-600 p-1"><Minus className="w-3.5 h-3.5"/></button>
-        )}
-        {!mixerDocked && (
-          <button onClick={()=>setMixerOpen(false)} onPointerDown={e=>e.stopPropagation()} className="text-gray-400 hover:text-gray-600 p-1"><X className="w-3.5 h-3.5"/></button>
-        )}
 
         {/* 3-dot menu */}
         <div className="relative" ref={menuRef}>
@@ -405,7 +422,7 @@ export function StudioMixer() {
   const body = (
     <div className="flex overflow-hidden flex-shrink-0" style={{ height: 368 }}>
 
-      {/* ① Static: Input — source path, not a recordable track ─── */}
+      {/* ① Static: Input — balance · fader · meter ─────────────── */}
       <div className="flex-shrink-0 flex flex-col items-center gap-2 px-2 py-3" style={{ width: 88 }}>
         <span className="text-[10px] font-bold text-gray-800 tracking-wide uppercase">Input</span>
 
@@ -417,14 +434,19 @@ export function StudioMixer() {
           </div>
         </div>
 
-        {/* Balance knob */}
+        {/* Balance */}
         <div className="text-[7px] font-bold text-gray-400 uppercase tracking-wider">Balance</div>
         <PanKnob value={micPan} onChange={h.micPan} color="#6b7280" size="sm"/>
 
-        {/* Routing status */}
-        <div className="w-full bg-gray-50 border border-gray-200 rounded-lg p-1 text-center mt-1">
-          <div className="text-[6px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">Route</div>
-          <div className="text-[9px] text-green-600 font-bold">→ Bus</div>
+        {/* Volume fader + level meter */}
+        <div className="flex gap-1 items-end">
+          <VerticalFader value={micGainVal} onChange={h.micGain} color="#374151" height={120}/>
+          <LevelMeter analyser={engine.micAnalyser} height={120} width={9}/>
+        </div>
+
+        {/* dB readout */}
+        <div className="w-full py-0.5 bg-gray-50 border border-gray-200 rounded text-center text-[9px] font-mono">
+          {((micGainVal-1)*12).toFixed(1)} dB
         </div>
       </div>
 
@@ -569,7 +591,7 @@ export function StudioMixer() {
       style={{ left: pos.x, top: pos.y, width: 1080, touchAction: 'none' }}>
       {titleBar}
       {statusBar}
-      {!minimized && body}
+      {body}
       {addTrackModal}
       <input ref={fileInputRef} type="file" accept="audio/*" className="hidden" onChange={handleFileLoad}/>
     </div>
