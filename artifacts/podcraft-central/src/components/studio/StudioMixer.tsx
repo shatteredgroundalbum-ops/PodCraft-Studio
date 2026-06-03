@@ -44,6 +44,7 @@ export function StudioMixer() {
     mixerOpen, setMixerOpen,
     mixerDocked, setMixerDocked,
     setAudioSetupDone,
+    roomProfile,
   } = useStudio();
 
   /* ── Floating drag ──────────────────────────────────────────── */
@@ -98,6 +99,17 @@ export function StudioMixer() {
   const [delayEnabled,   setDelayEnabled]    = useState(() => bln(S.delayEnabled,   false));
   const [gateEnabled,    setGateEnabled]     = useState(() => bln(S.gateEnabled,    false));
   const [limiterEnabled, setLimiterEnabled]  = useState(() => bln(S.limiterEnabled, false));
+
+  /* ── Room profile sync from context ────────────────────────── */
+  useEffect(() => {
+    if (!roomProfile) return;
+    /* Sync React state — engine effects already applied by applyRoomProfile in context */
+    setGateEnabled(roomProfile.gateEnabled);
+    setLimiterEnabled(roomProfile.limiterEnabled);
+    setCompEnabled(roomProfile.compEnabled);
+    setMicTrim(roomProfile.gain);
+    setMicEQ({ low: roomProfile.eq.low, mid: roomProfile.eq.mid, high: roomProfile.eq.high });
+  }, [roomProfile]);
 
   /* Pad state */
   const [pads,       setPads]       = useState<PadData[]>(makePads);

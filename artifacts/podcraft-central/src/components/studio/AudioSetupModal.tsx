@@ -1,207 +1,358 @@
-import React, { useEffect, useState } from 'react';
-import { Mic, Headphones, Home, ChevronRight, Check } from 'lucide-react';
-import { useStudio } from '../../store/StudioContext';
+import React, { useEffect, useRef, useState } from 'react';
+import { Mic, Headphones, ChevronRight, Check, Activity, AlertCircle, RefreshCw, Home } from 'lucide-react';
+import { useStudio, RoomProfileSettings } from '../../store/StudioContext';
 import { engine } from '../../utils/studioAudioEngine';
 
-const ROOM_OPTIONS = [
-  'Bedroom', 'Bathroom', 'Hallway', 'Living Room', 'Kitchen',
-  'Garage', 'Office', 'Warehouse', 'Vehicle', 'Semi-truck', 'Van', 'Other',
+/* ─── Room options ──────────────────────────────────────────── */
+const ROOM_TYPES = [
+  'Treated Room', 'Bedroom', 'Office', 'Living Room', 'Kitchen',
+  'Hallway', 'Bathroom / Reflective Room', 'Garage', 'Warehouse',
+  'Vehicle', 'Semi-truck', 'Van', 'Noisy Environment', 'Custom / Unknown',
 ];
 
-/* Room → mic EQ offsets applied on the input chain */
-const ROOM_EQ: Record<string, { low: number; mid: number; high: number }> = {
-  'Bedroom':     { low: -1, mid:  1, high:  0 },
-  'Bathroom':    { low:  2, mid: -2, high:  1 },
-  'Hallway':     { low:  1, mid: -1, high:  0 },
-  'Living Room': { low:  0, mid:  0, high:  0 },
-  'Kitchen':     { low: -1, mid:  1, high:  1 },
-  'Garage':      { low: -3, mid:  0, high: -1 },
-  'Office':      { low: -1, mid:  2, high:  1 },
-  'Warehouse':   { low: -4, mid: -1, high: -2 },
-  'Vehicle':     { low: -5, mid:  1, high: -2 },
-  'Semi-truck':  { low: -6, mid:  1, high: -3 },
-  'Van':         { low: -5, mid:  1, high: -2 },
-  'Other':       { low:  0, mid:  0, high:  0 },
+/* ─── Room → engine preset settings ─────────────────────────── */
+type ProfileBase = Omit<RoomProfileSettings, 'roomType' | 'noiseFloorDb' | 'reverbMs'>;
+const ROOM_PROFILES: Record<string, ProfileBase> = {
+  'Treated Room':               { eq:{low:-2,mid:2,high:2},  gain:0.85, gateEnabled:false, gateThresholdDb:-50, compEnabled:true,  limiterEnabled:false, recommendedPreset:'Broadcast Clarity'     },
+  'Bedroom':                    { eq:{low:-1,mid:1,high:0},  gain:0.80, gateEnabled:false, gateThresholdDb:-45, compEnabled:true,  limiterEnabled:false, recommendedPreset:'Podcast Voice - Warm'  },
+  'Office':                     { eq:{low:-1,mid:2,high:1},  gain:0.85, gateEnabled:false, gateThresholdDb:-44, compEnabled:true,  limiterEnabled:false, recommendedPreset:'Podcast Voice - Clean' },
+  'Living Room':                { eq:{low: 0,mid:0,high:0},  gain:0.80, gateEnabled:false, gateThresholdDb:-43, compEnabled:true,  limiterEnabled:false, recommendedPreset:'Podcast Voice - Clean' },
+  'Kitchen':                    { eq:{low:-1,mid:1,high:1},  gain:0.80, gateEnabled:true,  gateThresholdDb:-42, compEnabled:true,  limiterEnabled:false, recommendedPreset:'Podcast Voice - Clean' },
+  'Hallway':                    { eq:{low: 1,mid:-1,high:0}, gain:0.75, gateEnabled:true,  gateThresholdDb:-40, compEnabled:true,  limiterEnabled:false, recommendedPreset:'Untreated Room'        },
+  'Bathroom / Reflective Room': { eq:{low: 2,mid:-2,high:1}, gain:0.70, gateEnabled:true,  gateThresholdDb:-38, compEnabled:true,  limiterEnabled:true,  recommendedPreset:'Untreated Room'        },
+  'Garage':                     { eq:{low:-3,mid:0,high:-1}, gain:0.75, gateEnabled:true,  gateThresholdDb:-37, compEnabled:true,  limiterEnabled:true,  recommendedPreset:'Noisy Room'            },
+  'Warehouse':                  { eq:{low:-4,mid:-1,high:-2},gain:0.70, gateEnabled:true,  gateThresholdDb:-35, compEnabled:true,  limiterEnabled:true,  recommendedPreset:'Noisy Room'            },
+  'Vehicle':                    { eq:{low:-5,mid:1,high:-2}, gain:0.70, gateEnabled:true,  gateThresholdDb:-35, compEnabled:true,  limiterEnabled:true,  recommendedPreset:'Vehicle/Noise Control' },
+  'Semi-truck':                 { eq:{low:-6,mid:1,high:-3}, gain:0.65, gateEnabled:true,  gateThresholdDb:-32, compEnabled:true,  limiterEnabled:true,  recommendedPreset:'Vehicle/Noise Control' },
+  'Van':                        { eq:{low:-5,mid:1,high:-2}, gain:0.70, gateEnabled:true,  gateThresholdDb:-35, compEnabled:true,  limiterEnabled:true,  recommendedPreset:'Vehicle/Noise Control' },
+  'Noisy Environment':          { eq:{low:-4,mid:2,high:-2}, gain:0.70, gateEnabled:true,  gateThresholdDb:-32, compEnabled:true,  limiterEnabled:true,  recommendedPreset:'Noisy Room'            },
+  'Custom / Unknown':           { eq:{low: 0,mid:0,high:0},  gain:0.80, gateEnabled:false, gateThresholdDb:-40, compEnabled:false, limiterEnabled:false, recommendedPreset:'Custom'                },
 };
 
-/* Room → initial gain staging */
-const ROOM_GAIN: Record<string, number> = {
-  'Bedroom': 0.8, 'Bathroom': 0.7, 'Hallway': 0.75, 'Living Room': 0.8,
-  'Kitchen': 0.8, 'Garage': 0.75, 'Office': 0.85, 'Warehouse': 0.7,
-  'Vehicle': 0.7, 'Semi-truck': 0.65, 'Van': 0.7, 'Other': 0.8,
-};
+/* ─── Room classification from measurements ──────────────────── */
+function classifyRoom(noiseFloorDb: number, reverbMs: number, spectralLow: number, spectralHigh: number): string {
+  if (noiseFloorDb > -22) return 'Noisy Environment';
+  if (reverbMs > 550) {
+    if (spectralHigh > 35) return 'Bathroom / Reflective Room';
+    if (spectralLow > 50) return 'Warehouse';
+    return 'Hallway';
+  }
+  if (reverbMs > 350) {
+    if (spectralLow > 45) return 'Garage';
+    return 'Hallway';
+  }
+  if (reverbMs > 200) {
+    if (spectralHigh > 30) return 'Kitchen';
+    return 'Living Room';
+  }
+  if (reverbMs > 80) {
+    if (spectralHigh > 32) return 'Office';
+    return 'Bedroom';
+  }
+  return 'Treated Room';
+}
 
+/* ─── Select options ─────────────────────────────────────────── */
 const INTERFACE_OPTIONS = [
-  'Built-in / Laptop',
-  'Focusrite Scarlett Solo',
-  'Focusrite Scarlett 2i2',
-  'Focusrite Scarlett 4i4',
-  'SSL 2',
-  'SSL 2+',
-  'MOTU M2',
-  'Universal Audio Volt 1',
-  'Universal Audio Volt 176',
-  'PreSonus AudioBox USB 96',
-  'Behringer U-Phoria UM2',
-  'Audient iD4',
-  'RØDECaster Pro II',
-  'Zoom PodTrak P4',
-  'Custom',
+  'Built-in / Laptop','Focusrite Scarlett Solo','Focusrite Scarlett 2i2','Focusrite Scarlett 4i4',
+  'SSL 2','SSL 2+','MOTU M2','Universal Audio Volt 1','Universal Audio Volt 176',
+  'PreSonus AudioBox USB 96','Behringer U-Phoria UM2','Audient iD4',
+  'RØDECaster Pro II','Zoom PodTrak P4','Custom',
 ];
-
 const COMMON_MICS = [
-  'System Default',
-  'Shure SM7B',
-  'Rode PodMic',
-  'Rode NT-USB',
-  'Audio-Technica AT2020',
-  'Blue Yeti',
-  'Blue Yeti X',
-  'Elgato Wave 3',
-  'HyperX QuadCast',
-  'Sony ZV-1 (built-in)',
-  'Laptop Built-in',
-  'Custom',
+  'System Default','Shure SM7B','Rode PodMic','Rode NT-USB','Audio-Technica AT2020',
+  'Blue Yeti','Blue Yeti X','Elgato Wave 3','HyperX QuadCast','Sony ZV-1 (built-in)',
+  'Laptop Built-in','Custom',
 ];
-
 const HEADPHONE_OPTIONS = [
-  'System Default / Speakers',
-  'Sony MDR-7506',
-  'Audio-Technica ATH-M50x',
-  'Beyerdynamic DT 770 Pro',
-  'Sennheiser HD 280 Pro',
-  'AKG K240',
-  'Shure SRH840',
-  'AirPods / Wireless',
-  'Custom',
+  'System Default / Speakers','Sony MDR-7506','Audio-Technica ATH-M50x',
+  'Beyerdynamic DT 770 Pro','Sennheiser HD 280 Pro','AKG K240',
+  'Shure SRH840','AirPods / Wireless','Custom',
 ];
 
-type Step = 'interface' | 'mic' | 'headphones' | 'room';
-const STEPS: Step[] = ['interface', 'mic', 'headphones', 'room'];
+/* ─── Step types ─────────────────────────────────────────────── */
+type Step = 'interface' | 'mic' | 'headphones' | 'roomtest' | 'confirm';
+const STEPS: Step[] = ['interface', 'mic', 'headphones', 'roomtest', 'confirm'];
+const STEP_LABELS = ['Interface', 'Mic', 'Headphones', 'Room Test', 'Confirm'];
 
+/* ─── Room test state ─────────────────────────────────────────── */
+type TestPhase = 'idle' | 'requesting' | 'noise' | 'voice' | 'analyzing' | 'done' | 'error';
+
+interface RoomMeasurements {
+  noiseFloorDb: number;
+  reverbMs: number;
+  spectralLow: number;
+  spectralMid: number;
+  spectralHigh: number;
+  detectedRoom: string;
+}
+
+const NOISE_DURATION_MS  = 4000;
+const VOICE_DURATION_MS  = 6000;
+const SAMPLE_INTERVAL_MS = 50;
+
+/* ─── Main component ─────────────────────────────────────────── */
 export function AudioSetupModal() {
-  const { setAudioSetupDone, inputDevices, setSelectedInputId } = useStudio();
-  const [step, setStep] = useState<Step>('interface');
-  const [iface, setIface]  = useState('Built-in / Laptop');
-  const [mic,   setMic]    = useState('System Default');
-  const [phones,setPhones] = useState('System Default / Speakers');
-  const [room,  setRoom]   = useState('');
+  const { setAudioSetupDone, applyRoomProfile } = useStudio();
+
+  /* Step state */
+  const [step,   setStep]   = useState<Step>('interface');
+  const [iface,  setIface]  = useState('Built-in / Laptop');
+  const [mic,    setMic]    = useState('System Default');
+  const [phones, setPhones] = useState('System Default / Speakers');
+
+  /* Room test state */
+  const [testPhase,     setTestPhase]     = useState<TestPhase>('idle');
+  const [testProgress,  setTestProgress]  = useState(0);       // 0-100
+  const [currentRmsDb,  setCurrentRmsDb]  = useState(-90);     // live meter
+  const [measurements,  setMeasurements]  = useState<RoomMeasurements | null>(null);
+  const [overrideRoom,  setOverrideRoom]  = useState('');
+  const [testError,     setTestError]     = useState('');
+
+  const streamRef   = useRef<MediaStream | null>(null);
+  const actxRef     = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const cancelRef   = useRef(false);
 
   useEffect(() => { engine.init(); }, []);
 
-  const stepIdx  = STEPS.indexOf(step);
-  const isLast   = step === 'room';
+  /* Clean up on unmount */
+  useEffect(() => () => { cancelRef.current = true; cleanupTestAudio(); }, []);
 
-  const handleNext = () => {
-    if (!isLast) {
-      setStep(STEPS[stepIdx + 1]);
-      return;
-    }
-    handleFinish();
+  const cleanupTestAudio = () => {
+    streamRef.current?.getTracks().forEach(t => t.stop());
+    streamRef.current = null;
+    if (actxRef.current?.state !== 'closed') actxRef.current?.close().catch(() => {});
+    actxRef.current = null;
+    analyserRef.current = null;
   };
 
-  const handleFinish = () => {
-    /* Apply selected mic device */
-    if (inputDevices.length > 0) {
-      const chosen = inputDevices[0];
-      setSelectedInputId(chosen.deviceId);
+  /* ── Room test runner ──────────────────────────────────────── */
+  const runRoomTest = async () => {
+    cancelRef.current = false;
+    setTestError('');
+    setMeasurements(null);
+    setTestPhase('requesting');
+    setTestProgress(0);
+
+    /* Request mic access */
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+    } catch {
+      setTestPhase('error');
+      setTestError('Microphone access denied. Please allow microphone permission and try again.');
+      return;
     }
-    /* Apply room EQ to mic input chain */
-    const selectedRoom = room || 'Other';
-    const eq = ROOM_EQ[selectedRoom] ?? { low: 0, mid: 0, high: 0 };
-    const gain = ROOM_GAIN[selectedRoom] ?? 0.8;
-    engine.init();
-    engine.setInputGain(gain);
-    engine.setMicEQ('low',  eq.low);
-    engine.setMicEQ('mid',  eq.mid);
-    engine.setMicEQ('high', eq.high);
+    if (cancelRef.current) { stream.getTracks().forEach(t => t.stop()); return; }
+
+    streamRef.current = stream;
+    const actx = new AudioContext({ sampleRate: 48000 });
+    actxRef.current = actx;
+    const source = actx.createMediaStreamSource(stream);
+    const analyser = actx.createAnalyser();
+    analyser.fftSize = 2048;
+    analyser.smoothingTimeConstant = 0.15;
+    source.connect(analyser);
+    analyserRef.current = analyser;
+
+    const floatBuf = new Float32Array(analyser.fftSize);
+    const freqBuf  = new Uint8Array(analyser.frequencyBinCount);
+
+    const getRms = () => {
+      analyser.getFloatTimeDomainData(floatBuf);
+      let sq = 0;
+      for (let i = 0; i < floatBuf.length; i++) sq += floatBuf[i] * floatBuf[i];
+      return Math.sqrt(sq / floatBuf.length);
+    };
+
+    const sleep = (ms: number) => new Promise<void>(res => setTimeout(res, ms));
+
+    /* ── Phase 1: Noise floor (4 seconds silence) ── */
+    setTestPhase('noise');
+    const noiseSamples: number[] = [];
+    const noiseSteps = Math.floor(NOISE_DURATION_MS / SAMPLE_INTERVAL_MS);
+    for (let i = 0; i < noiseSteps; i++) {
+      if (cancelRef.current) { cleanupTestAudio(); return; }
+      const rms = getRms();
+      noiseSamples.push(rms);
+      const dbVal = rms > 0 ? 20 * Math.log10(Math.max(rms, 1e-10)) : -90;
+      setCurrentRmsDb(dbVal);
+      setTestProgress(Math.round((i / noiseSteps) * 50));
+      await sleep(SAMPLE_INTERVAL_MS);
+    }
+    /* 10th-percentile RMS = noise floor (excludes any transient spikes) */
+    const sorted = [...noiseSamples].sort((a, b) => a - b);
+    const noiseFloorRms = sorted[Math.max(0, Math.floor(sorted.length * 0.1))];
+    const noiseFloorDb  = noiseFloorRms > 0 ? 20 * Math.log10(Math.max(noiseFloorRms, 1e-10)) : -90;
+
+    /* ── Phase 2: Voice + decay (6 seconds) ── */
+    setTestPhase('voice');
+    const voiceSamples: number[] = [];
+    const voiceSteps = Math.floor(VOICE_DURATION_MS / SAMPLE_INTERVAL_MS);
+    let peakRms = 0;
+    let peakIdx = 0;
+    /* Capture FFT mid-way through voice phase for spectral balance */
+    let capturedFreqBuf: Uint8Array | null = null;
+
+    for (let i = 0; i < voiceSteps; i++) {
+      if (cancelRef.current) { cleanupTestAudio(); return; }
+      const rms = getRms();
+      voiceSamples.push(rms);
+      if (rms > peakRms) { peakRms = rms; peakIdx = i; }
+      const dbVal = rms > 0 ? 20 * Math.log10(Math.max(rms, 1e-10)) : -90;
+      setCurrentRmsDb(dbVal);
+      setTestProgress(50 + Math.round((i / voiceSteps) * 45));
+      /* Capture FFT at the peak or just before */
+      if (rms === peakRms && !capturedFreqBuf) {
+        analyser.getByteFrequencyData(freqBuf);
+        capturedFreqBuf = new Uint8Array(freqBuf);
+      }
+      await sleep(SAMPLE_INTERVAL_MS);
+    }
+
+    /* ── Phase 3: Analyze ── */
+    setTestPhase('analyzing');
+    setTestProgress(95);
+    await sleep(300);
+
+    /* Reverb estimate: count samples above (noiseFloor * 5) AFTER peak */
+    const decayThresholdRms = noiseFloorRms * 6;
+    let decaySampleCount = 0;
+    for (let i = peakIdx + 1; i < voiceSamples.length; i++) {
+      if (voiceSamples[i] > decayThresholdRms) decaySampleCount++;
+      else break;
+    }
+    const reverbMs = Math.min(decaySampleCount * SAMPLE_INTERVAL_MS, 800);
+
+    /* Spectral balance from captured FFT (or last reading) */
+    const fft = capturedFreqBuf ?? freqBuf;
+    analyser.getByteFrequencyData(freqBuf);
+    const sampleRate = actx.sampleRate;
+    const binCount   = analyser.frequencyBinCount;
+    const lowMax     = Math.floor(500  / (sampleRate / 2) * binCount);
+    const midMax     = Math.floor(4000 / (sampleRate / 2) * binCount);
+    let lowSum = 0, midSum = 0, highSum = 0;
+    for (let i = 0;      i < lowMax;   i++) lowSum  += fft[i];
+    for (let i = lowMax; i < midMax;   i++) midSum  += fft[i];
+    for (let i = midMax; i < binCount; i++) highSum += fft[i];
+    const total = (lowSum + midSum + highSum) || 1;
+    const spectralLow  = Math.round((lowSum  / total) * 100);
+    const spectralMid  = Math.round((midSum  / total) * 100);
+    const spectralHigh = Math.round((highSum / total) * 100);
+
+    const detectedRoom = classifyRoom(noiseFloorDb, reverbMs, spectralLow, spectralHigh);
+
+    cleanupTestAudio();
+    setTestProgress(100);
+
+    const result: RoomMeasurements = { noiseFloorDb, reverbMs, spectralLow, spectralMid, spectralHigh, detectedRoom };
+    setMeasurements(result);
+    setOverrideRoom(detectedRoom);
+    setTestPhase('done');
+  };
+
+  /* ── Finish: apply room profile and close ──────────────────── */
+  const handleFinish = () => {
+    const chosenRoom = overrideRoom || measurements?.detectedRoom || 'Custom / Unknown';
+    const base = ROOM_PROFILES[chosenRoom] ?? ROOM_PROFILES['Custom / Unknown'];
+    const profile: RoomProfileSettings = {
+      roomType:          chosenRoom,
+      noiseFloorDb:      measurements?.noiseFloorDb ?? -60,
+      reverbMs:          measurements?.reverbMs ?? 0,
+      ...base,
+    };
+    applyRoomProfile(profile);
     setAudioSetupDone(true);
   };
 
-  const canNext = step === 'interface' ? !!iface
-    : step === 'mic'        ? !!mic
-    : step === 'headphones' ? !!phones
-    : !!room;
+  /* ── Navigation ───────────────────────────────────────────── */
+  const stepIdx = STEPS.indexOf(step);
+  const isLast  = step === 'confirm';
 
+  const canNext =
+    step === 'interface'  ? !!iface
+    : step === 'mic'      ? !!mic
+    : step === 'headphones' ? !!phones
+    : step === 'roomtest' ? testPhase === 'done'
+    : true; /* confirm always ok */
+
+  const handleNext = () => {
+    if (step === 'roomtest' && testPhase !== 'done') return;
+    if (!isLast) { setStep(STEPS[stepIdx + 1]); return; }
+    handleFinish();
+  };
+
+  /* ── Render ───────────────────────────────────────────────── */
   return (
-    <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/40 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl shadow-2xl border border-gray-200 w-[480px] flex flex-col overflow-hidden">
+    <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+      <div className="bg-white rounded-2xl shadow-2xl border border-gray-200 w-[520px] flex flex-col overflow-hidden max-h-[90vh]">
 
         {/* Header */}
-        <div className="bg-gradient-to-r from-violet-600 to-purple-700 px-6 py-5">
+        <div className="bg-gradient-to-r from-violet-600 to-purple-700 px-6 py-5 shrink-0">
           <h2 className="text-lg font-bold text-white">Audio Setup</h2>
-          <p className="text-violet-200 text-sm mt-0.5">Configure your recording environment before you start.</p>
-          {/* Progress */}
-          <div className="flex gap-2 mt-4">
+          <p className="text-violet-200 text-sm mt-0.5">Configure your recording environment.</p>
+          <div className="flex gap-1.5 mt-4">
             {STEPS.map((s, i) => (
-              <div key={s} className={`flex-1 h-1.5 rounded-full transition-all ${i <= stepIdx ? 'bg-white' : 'bg-white/30'}`}/>
+              <div key={s} className="flex-1 flex flex-col items-center gap-1">
+                <div className={`w-full h-1.5 rounded-full transition-all ${i <= stepIdx ? 'bg-white' : 'bg-white/25'}`}/>
+                <span className={`text-[9px] font-medium tracking-wide ${i <= stepIdx ? 'text-white' : 'text-white/40'}`}>
+                  {STEP_LABELS[i].toUpperCase()}
+                </span>
+              </div>
             ))}
           </div>
         </div>
 
         {/* Body */}
-        <div className="px-6 py-5 flex-1">
+        <div className="px-6 py-5 flex-1 overflow-y-auto">
 
           {step === 'interface' && (
             <StepSelect
-              icon={<div className="w-8 h-8 bg-violet-100 rounded-lg flex items-center justify-center"><span className="text-violet-600 text-base">🎛</span></div>}
+              icon={<span className="text-xl">🎛️</span>} color="violet"
               title="Audio Interface"
-              description="Select the audio interface connected to your microphone."
-              options={INTERFACE_OPTIONS}
-              value={iface}
-              onChange={setIface}/>
+              description="Select the interface connected to your microphone."
+              options={INTERFACE_OPTIONS} value={iface} onChange={setIface}/>
           )}
 
           {step === 'mic' && (
             <StepSelect
-              icon={<div className="w-8 h-8 bg-red-100 rounded-lg flex items-center justify-center"><Mic className="w-4 h-4 text-red-600"/></div>}
+              icon={<Mic className="w-4 h-4 text-red-600"/>} color="red"
               title="Microphone"
-              description="Select your microphone model for accurate gain staging defaults."
-              options={COMMON_MICS}
-              value={mic}
-              onChange={setMic}/>
+              description="Select your microphone model for gain staging defaults."
+              options={COMMON_MICS} value={mic} onChange={setMic}/>
           )}
 
           {step === 'headphones' && (
             <StepSelect
-              icon={<div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center"><Headphones className="w-4 h-4 text-blue-600"/></div>}
+              icon={<Headphones className="w-4 h-4 text-blue-600"/>} color="blue"
               title="Monitoring / Headphones"
-              description="Select your headphones or monitoring output device."
-              options={HEADPHONE_OPTIONS}
-              value={phones}
-              onChange={setPhones}/>
+              description="Select your headphones or monitoring output."
+              options={HEADPHONE_OPTIONS} value={phones} onChange={setPhones}/>
           )}
 
-          {step === 'room' && (
-            <div>
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-8 h-8 bg-green-100 rounded-lg flex items-center justify-center"><Home className="w-4 h-4 text-green-600"/></div>
-                <div>
-                  <div className="font-semibold text-gray-900 text-sm">Recording Environment</div>
-                  <div className="text-xs text-gray-500">Select your room type — this sets initial EQ and gain staging.</div>
-                </div>
-              </div>
-              <div className="grid grid-cols-3 gap-2">
-                {ROOM_OPTIONS.map(r => (
-                  <button key={r} onClick={() => setRoom(r)}
-                    className={`px-3 py-2.5 rounded-xl border text-sm text-center transition-all font-medium ${
-                      room === r
-                        ? 'border-violet-500 bg-violet-50 text-violet-800'
-                        : 'border-gray-200 hover:border-gray-300 text-gray-700 hover:bg-gray-50'
-                    }`}>
-                    {r}
-                  </button>
-                ))}
-              </div>
-            </div>
+          {step === 'roomtest' && (
+            <RoomTestStep
+              phase={testPhase} progress={testProgress} rmsDb={currentRmsDb}
+              measurements={measurements} error={testError} onStart={runRoomTest}/>
+          )}
+
+          {step === 'confirm' && measurements && (
+            <ConfirmStep
+              measurements={measurements} overrideRoom={overrideRoom}
+              onOverride={setOverrideRoom}/>
+          )}
+
+          {step === 'confirm' && !measurements && (
+            <ConfirmStep
+              measurements={null} overrideRoom={overrideRoom || 'Custom / Unknown'}
+              onOverride={setOverrideRoom}/>
           )}
         </div>
 
         {/* Footer */}
-        <div className="border-t border-gray-100 px-6 py-4 flex items-center justify-between">
-          <div className="text-xs text-gray-400">
-            Step {stepIdx + 1} of {STEPS.length}
-          </div>
+        <div className="border-t border-gray-100 px-6 py-4 flex items-center justify-between shrink-0">
+          <span className="text-xs text-gray-400">Step {stepIdx + 1} of {STEPS.length}</span>
           <div className="flex gap-2">
             {stepIdx > 0 && (
               <button onClick={() => setStep(STEPS[stepIdx - 1])}
@@ -210,12 +361,12 @@ export function AudioSetupModal() {
               </button>
             )}
             <button onClick={() => setAudioSetupDone(true)}
-              className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700">
+              className="px-4 py-2 text-sm text-gray-400 hover:text-gray-600">
               Skip
             </button>
             <button onClick={handleNext} disabled={!canNext}
               className="flex items-center gap-1.5 px-5 py-2 text-sm font-bold text-white bg-violet-600 rounded-xl hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed">
-              {isLast ? <><Check className="w-4 h-4"/> Finish</> : <>Next <ChevronRight className="w-4 h-4"/></>}
+              {isLast ? <><Check className="w-4 h-4"/> Apply &amp; Finish</> : <>Next <ChevronRight className="w-4 h-4"/></>}
             </button>
           </div>
         </div>
@@ -224,14 +375,16 @@ export function AudioSetupModal() {
   );
 }
 
-function StepSelect({ icon, title, description, options, value, onChange }: {
-  icon: React.ReactNode; title: string; description: string;
+/* ─── StepSelect ─────────────────────────────────────────────── */
+function StepSelect({ icon, color, title, description, options, value, onChange }: {
+  icon: React.ReactNode; color: string; title: string; description: string;
   options: string[]; value: string; onChange: (v: string) => void;
 }) {
+  const bg: Record<string,string> = { violet:'bg-violet-100', red:'bg-red-100', blue:'bg-blue-100' };
   return (
     <div>
       <div className="flex items-center gap-3 mb-4">
-        {icon}
+        <div className={`w-9 h-9 ${bg[color] ?? 'bg-gray-100'} rounded-xl flex items-center justify-center shrink-0`}>{icon}</div>
         <div>
           <div className="font-semibold text-gray-900 text-sm">{title}</div>
           <div className="text-xs text-gray-500">{description}</div>
@@ -241,11 +394,229 @@ function StepSelect({ icon, title, description, options, value, onChange }: {
         className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm text-gray-800 focus:outline-none focus:border-violet-400 bg-white">
         {options.map(o => <option key={o} value={o}>{o}</option>)}
       </select>
-      <div className="mt-2 text-[11px] text-gray-400">
-        {title === 'Audio Interface' && 'This sets initial routing and gain defaults.'}
-        {title === 'Microphone' && 'This influences gain staging recommendations.'}
-        {title === 'Monitoring / Headphones' && 'This sets your monitor output preference.'}
-      </div>
     </div>
   );
+}
+
+/* ─── RoomTestStep ───────────────────────────────────────────── */
+function RoomTestStep({ phase, progress, rmsDb, measurements, error, onStart }: {
+  phase: TestPhase; progress: number; rmsDb: number;
+  measurements: RoomMeasurements | null; error: string; onStart: () => void;
+}) {
+  const meterPct = Math.max(0, Math.min(100, (rmsDb + 90) / 90 * 100));
+  const meterColor = rmsDb > -12 ? 'bg-red-500' : rmsDb > -24 ? 'bg-yellow-400' : 'bg-green-500';
+
+  return (
+    <div>
+      <div className="flex items-center gap-3 mb-4">
+        <div className="w-9 h-9 bg-green-100 rounded-xl flex items-center justify-center shrink-0">
+          <Activity className="w-4 h-4 text-green-600"/>
+        </div>
+        <div>
+          <div className="font-semibold text-gray-900 text-sm">Room Environment Test</div>
+          <div className="text-xs text-gray-500">Real-time analysis using your microphone — no fake results.</div>
+        </div>
+      </div>
+
+      {phase === 'idle' && (
+        <div className="text-center py-6">
+          <p className="text-sm text-gray-600 mb-1">We'll measure your recording space to recommend optimal settings.</p>
+          <p className="text-xs text-gray-400 mb-5">Takes about 10 seconds. Sit or stand in your normal recording position.</p>
+          <button onClick={onStart}
+            className="px-6 py-2.5 bg-violet-600 text-white text-sm font-bold rounded-xl hover:bg-violet-700">
+            Start Room Test
+          </button>
+        </div>
+      )}
+
+      {phase === 'requesting' && (
+        <div className="text-center py-6">
+          <div className="w-10 h-10 border-4 border-violet-200 border-t-violet-600 rounded-full animate-spin mx-auto mb-3"/>
+          <p className="text-sm text-gray-600">Requesting microphone access…</p>
+        </div>
+      )}
+
+      {(phase === 'noise' || phase === 'voice') && (
+        <div className="space-y-4">
+          {/* Phase label */}
+          <div className={`rounded-xl px-4 py-3 text-sm font-medium ${phase === 'noise' ? 'bg-blue-50 text-blue-800 border border-blue-200' : 'bg-amber-50 text-amber-800 border border-amber-200'}`}>
+            {phase === 'noise'
+              ? '🔇  Remain completely silent for 4 seconds…'
+              : '🎙  Speak a phrase: "Testing, one two three, testing" — then remain silent.'}
+          </div>
+
+          {/* Level meter */}
+          <div>
+            <div className="flex justify-between text-[10px] text-gray-400 mb-1">
+              <span>Input level</span>
+              <span>{rmsDb < -89 ? '—' : `${rmsDb.toFixed(1)} dBFS`}</span>
+            </div>
+            <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
+              <div className={`h-full rounded-full transition-all duration-75 ${meterColor}`} style={{width:`${meterPct}%`}}/>
+            </div>
+          </div>
+
+          {/* Progress bar */}
+          <div>
+            <div className="flex justify-between text-[10px] text-gray-400 mb-1">
+              <span>{phase === 'noise' ? 'Silence measurement' : 'Voice measurement'}</span>
+              <span>{progress}%</span>
+            </div>
+            <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+              <div className="h-full bg-violet-500 rounded-full transition-all duration-100" style={{width:`${progress}%`}}/>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {phase === 'analyzing' && (
+        <div className="text-center py-6">
+          <div className="w-10 h-10 border-4 border-violet-200 border-t-violet-600 rounded-full animate-spin mx-auto mb-3"/>
+          <p className="text-sm text-gray-600">Analyzing room acoustics…</p>
+        </div>
+      )}
+
+      {phase === 'done' && measurements && (
+        <div className="space-y-3">
+          <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-3">
+            <div className="text-sm font-semibold text-green-800 mb-0.5">✓ Analysis complete</div>
+            <div className="text-xs text-green-700">Detected: <span className="font-bold">{measurements.detectedRoom}</span></div>
+          </div>
+
+          {/* Measurements grid */}
+          <div className="grid grid-cols-2 gap-2">
+            <Metric label="Noise Floor" value={`${measurements.noiseFloorDb.toFixed(1)} dBFS`}
+              note={measurements.noiseFloorDb > -30 ? 'High — gate recommended' : 'Good'}
+              warn={measurements.noiseFloorDb > -30}/>
+            <Metric label="Reverb Est." value={`~${measurements.reverbMs} ms`}
+              note="Estimated from speech decay" warn={false} approx/>
+          </div>
+
+          {/* Spectral bar */}
+          <div className="bg-gray-50 rounded-xl p-3">
+            <div className="text-[10px] text-gray-500 font-semibold mb-2 uppercase tracking-wide">Spectral Balance (estimated)</div>
+            <SpectralBar low={measurements.spectralLow} mid={measurements.spectralMid} high={measurements.spectralHigh}/>
+          </div>
+
+          <button onClick={onStart}
+            className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-violet-600 mt-1">
+            <RefreshCw className="w-3 h-3"/> Re-run test
+          </button>
+        </div>
+      )}
+
+      {phase === 'error' && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex gap-3">
+          <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5"/>
+          <div>
+            <p className="text-sm text-red-700 font-medium">Test failed</p>
+            <p className="text-xs text-red-600 mt-0.5">{error}</p>
+            <button onClick={onStart} className="text-xs text-red-600 underline mt-2">Try again</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── ConfirmStep ────────────────────────────────────────────── */
+function ConfirmStep({ measurements, overrideRoom, onOverride }: {
+  measurements: RoomMeasurements | null;
+  overrideRoom: string;
+  onOverride: (room: string) => void;
+}) {
+  const base = ROOM_PROFILES[overrideRoom] ?? ROOM_PROFILES['Custom / Unknown'];
+
+  return (
+    <div>
+      <div className="flex items-center gap-3 mb-4">
+        <div className="w-9 h-9 bg-violet-100 rounded-xl flex items-center justify-center shrink-0">
+          <Home className="w-4 h-4 text-violet-600"/>
+        </div>
+        <div>
+          <div className="font-semibold text-gray-900 text-sm">Confirm Room Profile</div>
+          <div className="text-xs text-gray-500">Review and override before applying.</div>
+        </div>
+      </div>
+
+      {/* Override selector */}
+      <div className="mb-4">
+        <label className="block text-xs text-gray-500 font-semibold uppercase tracking-wide mb-1.5">
+          Room type {measurements ? '(auto-detected — override if wrong)' : '(manual selection)'}
+        </label>
+        <select value={overrideRoom} onChange={e => onOverride(e.target.value)}
+          className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm text-gray-800 focus:outline-none focus:border-violet-400 bg-white">
+          {ROOM_TYPES.map(r => (
+            <option key={r} value={r}>{r}{measurements?.detectedRoom === r ? ' (detected)' : ''}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Settings preview */}
+      <div className="bg-gray-50 rounded-xl p-4 space-y-2">
+        <div className="text-[10px] text-gray-400 font-semibold uppercase tracking-wide mb-2">Settings that will be applied</div>
+
+        <SettingRow label="Input Gain"    value={`${Math.round(base.gain * 100)}%`}/>
+        <SettingRow label="Mic EQ Low"    value={fmtDb(base.eq.low)}/>
+        <SettingRow label="Mic EQ Mid"    value={fmtDb(base.eq.mid)}/>
+        <SettingRow label="Mic EQ High"   value={fmtDb(base.eq.high)}/>
+        <SettingRow label="Noise Gate"    value={base.gateEnabled ? `On (${base.gateThresholdDb} dBFS)` : 'Off'}
+          highlight={base.gateEnabled}/>
+        <SettingRow label="Compressor"    value={base.compEnabled ? 'On'  : 'Off'} highlight={base.compEnabled}/>
+        <SettingRow label="Limiter"       value={base.limiterEnabled ? 'On' : 'Off'} highlight={base.limiterEnabled}/>
+        <SettingRow label="Track Preset"  value={base.recommendedPreset}/>
+      </div>
+
+      <p className="text-[11px] text-gray-400 mt-3">
+        These are starting points — you can adjust all effects in the Mixer at any time.
+      </p>
+    </div>
+  );
+}
+
+/* ─── Helper components ──────────────────────────────────────── */
+function Metric({ label, value, note, warn, approx }: {
+  label: string; value: string; note: string; warn: boolean; approx?: boolean;
+}) {
+  return (
+    <div className={`rounded-xl p-3 border ${warn ? 'bg-yellow-50 border-yellow-200' : 'bg-gray-50 border-gray-200'}`}>
+      <div className="flex items-center gap-1">
+        <span className="text-[10px] text-gray-500 font-semibold uppercase tracking-wide">{label}</span>
+        {approx && <span className="text-[9px] text-gray-400">(est.)</span>}
+      </div>
+      <div className={`text-sm font-bold mt-0.5 ${warn ? 'text-yellow-700' : 'text-gray-800'}`}>{value}</div>
+      <div className={`text-[10px] mt-0.5 ${warn ? 'text-yellow-600' : 'text-gray-400'}`}>{note}</div>
+    </div>
+  );
+}
+
+function SpectralBar({ low, mid, high }: { low: number; mid: number; high: number }) {
+  return (
+    <div className="space-y-1.5">
+      {[['Low (< 500 Hz)',  low,  'bg-purple-400'], ['Mid (0.5–4 kHz)', mid, 'bg-violet-500'], ['High (> 4 kHz)',  high, 'bg-blue-400']]
+        .map(([lbl, pct, cls]) => (
+          <div key={lbl as string} className="flex items-center gap-2">
+            <span className="text-[10px] text-gray-500 w-28 shrink-0">{lbl as string}</span>
+            <div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
+              <div className={`h-full rounded-full ${cls as string}`} style={{width:`${pct as number}%`}}/>
+            </div>
+            <span className="text-[10px] text-gray-500 w-7 text-right">{pct as number}%</span>
+          </div>
+        ))}
+    </div>
+  );
+}
+
+function SettingRow({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
+  return (
+    <div className="flex justify-between items-center py-0.5">
+      <span className="text-xs text-gray-500">{label}</span>
+      <span className={`text-xs font-semibold ${highlight ? 'text-violet-700' : 'text-gray-700'}`}>{value}</span>
+    </div>
+  );
+}
+
+function fmtDb(val: number): string {
+  if (val === 0) return '0 dB';
+  return val > 0 ? `+${val} dB` : `${val} dB`;
 }

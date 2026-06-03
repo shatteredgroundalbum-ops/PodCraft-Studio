@@ -42,6 +42,19 @@ export const TRACK_PRESETS: Record<string, TrackPresetDef> = {
   'Custom':                 { gain: 1.0, eq: { low: 0,  mid: 0,  high: 0  }, compressor: { enabled: false, threshold: 0,   ratio: 1 } },
 };
 
+export interface RoomProfileSettings {
+  roomType: string;
+  noiseFloorDb: number;
+  reverbMs: number;
+  eq: { low: number; mid: number; high: number };
+  gain: number;
+  gateEnabled: boolean;
+  gateThresholdDb: number;
+  compEnabled: boolean;
+  limiterEnabled: boolean;
+  recommendedPreset: string;
+}
+
 interface StudioContextType {
   tracks: Track[];
   addTrack: (type: TrackType, name?: string) => void;
@@ -70,6 +83,9 @@ interface StudioContextType {
   setMixerDocked: (docked: boolean) => void;
   audioSetupDone: boolean;
   setAudioSetupDone: (done: boolean) => void;
+  roomProfile: RoomProfileSettings | null;
+  applyRoomProfile: (profile: RoomProfileSettings) => void;
+  programRecordingBlob: Blob | null;
 }
 
 const trackPalette = [
@@ -95,6 +111,8 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
   const [audioSetupDone, setAudioSetupDoneState] = useState(() => {
     try { return localStorage.getItem('podcraft_audio_setup') === 'done'; } catch { return false; }
   });
+  const [roomProfile, setRoomProfile] = useState<RoomProfileSettings | null>(null);
+  const [programRecordingBlob, setProgramRecordingBlob] = useState<Blob | null>(null);
 
   const timerRef = useRef<number | null>(null);
   const lastTimeRef = useRef(0);
@@ -147,7 +165,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
 
   const deleteTrack = (id: string) => setTracks((prev) => prev.filter((t) => t.id !== id));
 
-  const applyTrackPreset = (trackId: string, presetName: string) => {
+  const applyTrackPreset = useCallback((trackId: string, presetName: string) => {
     const p = TRACK_PRESETS[presetName];
     if (!p) return;
     engine.setTrackEQ(trackId, 'low', p.eq.low);
@@ -155,7 +173,20 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     engine.setTrackEQ(trackId, 'high', p.eq.high);
     engine.setTrackCompressor(trackId, p.compressor.enabled, p.compressor.threshold, p.compressor.ratio);
     updateTrack(trackId, { volume: p.gain, preset: presetName });
-  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const applyRoomProfile = useCallback((profile: RoomProfileSettings) => {
+    engine.init();
+    engine.setInputGain(profile.gain);
+    engine.setMicEQ('low',  profile.eq.low);
+    engine.setMicEQ('mid',  profile.eq.mid);
+    engine.setMicEQ('high', profile.eq.high);
+    engine.setNoiseGateEnabled(profile.gateEnabled, profile.gateThresholdDb);
+    engine.setCompressor(profile.compEnabled);
+    engine.setLimiterEnabled(profile.limiterEnabled);
+    setRoomProfile(profile);
+  }, []);
 
   const tick = useCallback(() => {
     const now = performance.now();
@@ -186,8 +217,10 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     if (isRecording) {
       setIsRecording(false);
       stopTimer();
-      const blob = await engine.stopRecording();
-      const buffer = await engine.decodeAudioData(blob);
+
+      // Stop raw mic recording → timeline clips (voice tracks only)
+      const micBlob = await engine.stopRecording();
+      const buffer = await engine.decodeAudioData(micBlob);
       if (buffer) {
         const newClip: AudioClip = {
           id: Math.random().toString(36).substr(2, 9),
@@ -195,12 +228,21 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         };
         setTracks((prev) => prev.map((t) => t.armed ? { ...t, clips: [...t.clips, newClip] } : t));
       }
+
+      // Stop program mix recording → captures everything (mic + pads triggered during recording)
+      const mixBlob = await engine.stopMixRecording();
+      setProgramRecordingBlob(mixBlob.size > 1000 ? mixBlob : null);
+
     } else {
       const armedTracks = tracks.filter((t) => t.armed);
       if (armedTracks.length === 0) { alert('Please arm at least one track to record.'); return; }
       if (!engine.stream) await engine.requestInput(selectedInputId || undefined);
-      const started = engine.startRecording(() => {});
-      if (started) {
+
+      // Start both: raw mic recording (timeline clips) + program mix recording (full show capture)
+      const micStarted  = engine.startRecording(() => {});
+      engine.startMixRecording(() => {});
+
+      if (micStarted) {
         setIsRecording(true);
         recordStartRef.current = playheadPosition;
         startTimer();
@@ -243,6 +285,8 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
       mixerOpen, setMixerOpen,
       mixerDocked, setMixerDocked,
       audioSetupDone, setAudioSetupDone,
+      roomProfile, applyRoomProfile,
+      programRecordingBlob,
     }}>
       {children}
     </StudioContext.Provider>
