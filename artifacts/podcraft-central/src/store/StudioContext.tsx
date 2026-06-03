@@ -25,7 +25,7 @@ export interface Track {
 
 interface StudioContextType {
   tracks: Track[];
-  addTrack: (type: TrackType) => void;
+  addTrack: (type: TrackType, name?: string) => void;
   updateTrack: (id: string, updates: Partial<Track>) => void;
   deleteTrack: (id: string) => void;
   isPlaying: boolean;
@@ -94,16 +94,18 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     if (selectedInputId) engine.requestInput(selectedInputId);
   }, [selectedInputId]);
 
-  const addTrack = (type: TrackType) => {
+  const addTrack = (type: TrackType, name?: string) => {
     if (tracks.length >= 32) return;
     setTracks((prev) => [
       ...prev,
       {
         id: Math.random().toString(36).substr(2, 9),
-        name: `Track ${prev.length + 1}`,
+        name: name ?? `Track ${prev.length + 1}`,
         type,
         color: trackPalette[prev.length % trackPalette.length],
-        volume: 1, pan: 0, muted: false, soloed: false, armed: false, clips: [],
+        volume: 1, pan: 0, muted: false, soloed: false,
+        armed: type === 'mic',
+        clips: [],
       },
     ]);
   };

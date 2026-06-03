@@ -44,6 +44,16 @@ export class AudioEngine {
   sfxBusPanner:   StereoPannerNode | null = null;
   sfxBusAnalyser: AnalyserNode | null = null;
 
+  // ── Reverb effect (parallel wet send from mic post-fader) ─────
+  reverbSendGain:   GainNode | null = null;
+  reverbConvolver:  ConvolverNode | null = null;
+  reverbReturnGain: GainNode | null = null;
+
+  // ── Delay effect (parallel wet send from mic post-fader) ──────
+  delaySendGain:    GainNode | null = null;
+  delayNode:        DelayNode | null = null;
+  delayReturnGain:  GainNode | null = null;
+
   // ── Monitor/Headphone bus ─────────────────────────────────────
   monitorGain:     GainNode | null = null;
   monitorAnalyser: AnalyserNode | null = null;
@@ -85,6 +95,27 @@ export class AudioEngine {
     this.masterGain.connect(this.masterCompressor);
     this.masterCompressor.connect(this.masterAnalyser);
     this.masterAnalyser.connect(this.ctx.destination);
+
+    // Reverb effect (ConvolverNode — parallel wet send, input wired in requestInput)
+    this.reverbSendGain   = this.ctx.createGain();
+    this.reverbSendGain.gain.value = 0; // off by default
+    this.reverbConvolver  = this.ctx.createConvolver();
+    this.reverbReturnGain = this.ctx.createGain();
+    this.reverbReturnGain.gain.value = 0.7;
+    this.reverbSendGain.connect(this.reverbConvolver);
+    this.reverbConvolver.connect(this.reverbReturnGain);
+    this.reverbReturnGain.connect(this.masterGain);
+
+    // Delay effect (DelayNode — parallel wet send, input wired in requestInput)
+    this.delaySendGain   = this.ctx.createGain();
+    this.delaySendGain.gain.value = 0; // off by default
+    this.delayNode       = this.ctx.createDelay(5.0);
+    this.delayNode.delayTime.value = 0.12; // 120ms
+    this.delayReturnGain = this.ctx.createGain();
+    this.delayReturnGain.gain.value = 0.4;
+    this.delaySendGain.connect(this.delayNode);
+    this.delayNode.connect(this.delayReturnGain);
+    this.delayReturnGain.connect(this.masterGain);
 
     // Monitor bus (parallel tap from masterGain)
     this.monitorGain = this.ctx.createGain();
@@ -168,6 +199,11 @@ export class AudioEngine {
         this.micGain.connect(this.micPanner);
         this.micPanner.connect(this.micAnalyser);
         this.micAnalyser.connect(this.masterGain);
+        // Hook mic into effects sends (parallel wet paths)
+        if (this.reverbSendGain) this.micAnalyser.connect(this.reverbSendGain);
+        if (this.delaySendGain)  this.micAnalyser.connect(this.delaySendGain);
+        // Build synthetic reverb IR now that ctx + sample rate are known
+        if (this.reverbConvolver) this.reverbConvolver.buffer = this._generateReverbIR();
       }
       return true;
     } catch { return false; }
@@ -220,6 +256,29 @@ export class AudioEngine {
   setMicEQ     (band: 'low'|'mid'|'high', db: number) { if (this.micEQ)      this.micEQ[band].gain.value = db; }
   setMusicBusEQ(band: 'low'|'mid'|'high', db: number) { if (this.musicBusEQ) this.musicBusEQ[band].gain.value = db; }
   setSfxBusEQ  (band: 'low'|'mid'|'high', db: number) { if (this.sfxBusEQ)   this.sfxBusEQ[band].gain.value = db; }
+
+  // ── Reverb (ConvolverNode — synthetic exponential IR) ────────
+  setReverbEnabled(enabled: boolean) {
+    if (this.reverbSendGain) this.reverbSendGain.gain.value = enabled ? 1.0 : 0;
+  }
+
+  // ── Delay (DelayNode — 120 ms default) ──────────────────────
+  setDelayEnabled(enabled: boolean) {
+    if (this.delaySendGain) this.delaySendGain.gain.value = enabled ? 0.45 : 0;
+  }
+
+  private _generateReverbIR(duration = 1.5, decay = 3.0): AudioBuffer {
+    const sr  = this.ctx!.sampleRate;
+    const len = Math.round(sr * duration);
+    const buf = this.ctx!.createBuffer(2, len, sr);
+    for (let ch = 0; ch < 2; ch++) {
+      const d = buf.getChannelData(ch);
+      for (let i = 0; i < len; i++) {
+        d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, decay);
+      }
+    }
+    return buf;
+  }
 
   // ── Mic recording (for timeline clips) ──────────────────────
   startRecording(onDataAvailable: (blob: Blob) => void): boolean {

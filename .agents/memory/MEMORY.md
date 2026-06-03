@@ -1,1 +1,2 @@
 - [AI Producer pipeline](ai-producer-pipeline.md) — 8-stage pipeline, all services in stages/, qualityScorecardService at services/ai root; ApprovalGate required before distribution actions
+- [Mixer layout architecture](mixer-layout.md) — static sections + single scrollable track strip; reverb/delay/compressor/EQ/ducking wired to real nodes; noise gate unavailable.
