@@ -98,12 +98,6 @@ export function AppLayout({ children, title, breadcrumbs, rightHeader }: AppLayo
             </button>
           </div>
         )}
-        <div className="p-4 border-t border-gray-100">
-          <Link to="/settings" className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${location.pathname.startsWith('/settings') ? 'bg-violet-50 text-violet-700' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'}`}>
-            <SettingsIcon className={`w-5 h-5 ${location.pathname.startsWith('/settings') ? 'text-violet-600' : 'text-gray-400'}`} />
-            Settings
-          </Link>
-        </div>
       </div>
 
       {/* Main Content */}
