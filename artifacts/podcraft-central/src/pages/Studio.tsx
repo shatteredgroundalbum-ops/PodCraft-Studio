@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState, useRef } from 'react';
 import { StudioProvider } from '../store/StudioContext';
 import { useStudio } from '../store/StudioContext';
+import { AIModelProvider } from '../store/AIModelStore';
 import { StudioSidebar } from '../components/studio/StudioSidebar';
 import { StudioTopBar } from '../components/studio/StudioTopBar';
 import { StudioScriptPanel } from '../components/studio/StudioScriptPanel';
@@ -103,7 +104,9 @@ function StudioPage() {
 export function Studio() {
   return (
     <StudioProvider>
-      <StudioPage />
+      <AIModelProvider>
+        <StudioPage />
+      </AIModelProvider>
     </StudioProvider>
   );
 }

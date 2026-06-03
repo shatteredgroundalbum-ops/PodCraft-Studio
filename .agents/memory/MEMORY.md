@@ -1,1 +1,2 @@
 - [Studio effects wiring](studio-effects.md) — all 6 effects pads are wired; Gate/Limiter use RMS-RAF + DynamicsCompressor patterns
+- [AI Model Selection System](ai-model-system.md) — Local AI (Transformers.js) + Cloud AI (OpenAI/Anthropic/Gemini/Ollama) wired through AIModelStore context into StudioAIPanel
