@@ -273,10 +273,10 @@ export function StudioMixer() {
   /* ── Transport + Status bar: device · timer | transport | BPM ── */
   const statusBar = (
     <div
-      className="h-10 bg-white border-b border-gray-100 flex items-center justify-between px-3 flex-shrink-0"
+      className="h-9 bg-white border-b border-gray-100 flex items-center justify-between px-3 flex-shrink-0"
       onPointerDown={e=>e.stopPropagation()}>
       {/* Left: device picker · timer · session */}
-      <div className="flex items-center gap-2 min-w-0 flex-1">
+      <div className="flex items-center gap-2 min-w-0">
         <div className="relative flex-shrink-0">
           <button onClick={()=>setStatusDeviceOpen(o=>!o)}
             className="flex items-center gap-1 text-[10px] text-gray-700 font-semibold hover:text-violet-600 transition-colors">
@@ -300,39 +300,10 @@ export function StudioMixer() {
         <div className="w-px h-3.5 bg-gray-200 flex-shrink-0"/>
         <span className="text-[10px] font-mono text-gray-700 flex-shrink-0">{formatTime(playheadPosition)}</span>
         <div className="w-px h-3.5 bg-gray-200 flex-shrink-0"/>
-        <span className="text-[10px] text-gray-500 font-medium truncate max-w-[90px]">New Recording</span>
+        <span className="text-[10px] text-gray-500 font-medium truncate max-w-[120px]">New Recording</span>
       </div>
-
-      {/* Center: Transport controls */}
-      <div className="flex items-center gap-1 flex-shrink-0 mx-3">
-        <button onClick={stop} title="Rewind"
-          className="w-7 h-7 flex items-center justify-center rounded-lg bg-gray-50 hover:bg-gray-100 text-gray-500 border border-gray-200 transition-colors">
-          <Rewind className="w-3 h-3"/>
-        </button>
-        <button onClick={stop} title="Stop"
-          className="w-7 h-7 flex items-center justify-center rounded-lg bg-gray-50 hover:bg-gray-100 text-gray-700 border border-gray-200 transition-colors">
-          <Square className="w-3 h-3 fill-current"/>
-        </button>
-        <button onClick={togglePlay} title={isPlaying ? 'Pause' : 'Play'}
-          className={`w-8 h-8 flex items-center justify-center rounded-lg border-2 transition-all ${
-            isPlaying ? 'bg-green-500 border-green-400 text-white' : 'bg-green-50 border-green-300 text-green-600 hover:bg-green-100'
-          }`}>
-          <Play className="w-3.5 h-3.5 fill-current ml-0.5"/>
-        </button>
-        <button onClick={toggleRecord} title={isRecording ? 'Stop Recording' : 'Record'}
-          className={`w-8 h-8 flex items-center justify-center rounded-lg border-2 transition-all ${
-            isRecording ? 'bg-red-500 border-red-400 text-white animate-pulse' : 'bg-red-50 border-red-300 text-red-600 hover:bg-red-100'
-          }`}>
-          <Circle className="w-3.5 h-3.5 fill-current"/>
-        </button>
-        <button title="Fast Forward"
-          className="w-7 h-7 flex items-center justify-center rounded-lg bg-gray-50 hover:bg-gray-100 text-gray-500 border border-gray-200 transition-colors">
-          <FastForward className="w-3 h-3"/>
-        </button>
-      </div>
-
       {/* Right: BPM */}
-      <div className="flex items-center gap-1 bg-violet-50 text-violet-600 px-2 py-0.5 rounded flex-shrink-0 flex-1 justify-end">
+      <div className="flex items-center gap-1 bg-violet-50 text-violet-600 px-2 py-0.5 rounded flex-shrink-0">
         <svg className="w-2.5 h-2.5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
           <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
         </svg>
@@ -341,6 +312,38 @@ export function StudioMixer() {
           className="bg-transparent w-7 text-[10px] font-bold focus:outline-none text-center"/>
         <span className="text-[10px] font-bold">BPM</span>
       </div>
+    </div>
+  );
+
+  /* ── Transport bar: pinned to bottom of mixer ───────────────── */
+  const transportBar = (
+    <div
+      className="h-12 bg-gray-50 border-t border-gray-200 flex items-center justify-center gap-2 flex-shrink-0"
+      onPointerDown={e=>e.stopPropagation()}>
+      <button onClick={stop} title="Rewind"
+        className="w-9 h-9 flex items-center justify-center rounded-xl bg-white hover:bg-gray-100 text-gray-500 border border-gray-200 shadow-sm transition-colors">
+        <Rewind className="w-4 h-4"/>
+      </button>
+      <button onClick={stop} title="Stop"
+        className="w-9 h-9 flex items-center justify-center rounded-xl bg-white hover:bg-gray-100 text-gray-700 border border-gray-200 shadow-sm transition-colors">
+        <Square className="w-4 h-4 fill-current"/>
+      </button>
+      <button onClick={togglePlay} title={isPlaying ? 'Pause' : 'Play'}
+        className={`w-11 h-11 flex items-center justify-center rounded-xl border-2 shadow-md transition-all ${
+          isPlaying ? 'bg-green-500 border-green-400 text-white' : 'bg-green-50 border-green-300 text-green-600 hover:bg-green-100'
+        }`}>
+        <Play className="w-5 h-5 fill-current ml-0.5"/>
+      </button>
+      <button onClick={toggleRecord} title={isRecording ? 'Stop Recording' : 'Record'}
+        className={`w-11 h-11 flex items-center justify-center rounded-xl border-2 shadow-md transition-all ${
+          isRecording ? 'bg-red-500 border-red-400 text-white animate-pulse' : 'bg-red-50 border-red-300 text-red-600 hover:bg-red-100'
+        }`}>
+        <Circle className="w-5 h-5 fill-current"/>
+      </button>
+      <button title="Fast Forward"
+        className="w-9 h-9 flex items-center justify-center rounded-xl bg-white hover:bg-gray-100 text-gray-500 border border-gray-200 shadow-sm transition-colors">
+        <FastForward className="w-4 h-4"/>
+      </button>
     </div>
   );
 
@@ -579,6 +582,7 @@ export function StudioMixer() {
             {body}
           </div>
         </div>
+        {transportBar}
         {addTrackModal}
         <input ref={fileInputRef} type="file" accept="audio/*" className="hidden" onChange={handleFileLoad}/>
       </div>
@@ -592,6 +596,7 @@ export function StudioMixer() {
       {titleBar}
       {statusBar}
       {body}
+      {transportBar}
       {addTrackModal}
       <input ref={fileInputRef} type="file" accept="audio/*" className="hidden" onChange={handleFileLoad}/>
     </div>
