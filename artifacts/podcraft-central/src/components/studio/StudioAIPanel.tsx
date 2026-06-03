@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import {
   Sparkles, MoreVertical, Send,
   PanelRightClose, PanelLeftClose, Trash2, Download,
-  Wifi, WifiOff, Loader2, Cpu, Cloud,
+  Loader2, Cpu, Cloud, Zap,
 } from 'lucide-react';
 import { useAIModel } from '../../store/AIModelStore';
 import { AIModelSelector } from '../ai/AIModelSelector';
@@ -12,8 +12,7 @@ type Tab = 'Chat' | 'Assistant' | 'Notes';
 interface Message { role: 'system' | 'user' | 'assistant'; content: string; }
 interface StudioAIPanelProps { width: number; collapsed: boolean; onToggleCollapsed: () => void; }
 
-const SYSTEM_PROMPT =
-  'You are an AI podcast producer assistant inside PodCraft Central. Help with show notes, episode titles, guest research, interview questions, scripting, production decisions, and audio quality tips. Be concise and actionable.';
+const MODULE_ID = 'ai-producer';
 
 export function StudioAIPanel({ width, collapsed, onToggleCollapsed }: StudioAIPanelProps) {
   const ai = useAIModel();
@@ -27,9 +26,13 @@ export function StudioAIPanel({ width, collapsed, onToggleCollapsed }: StudioAIP
 
   const [notes, setNotes] = useState(() => localStorage.getItem('podcraft_notes') || '');
   const [messages, setMessages] = useState<Message[]>(() => {
-    try { const s = localStorage.getItem('podcraft_chat'); if (s) return JSON.parse(s); } catch { /* ok */ }
+    try { const s = localStorage.getItem('podcraft_chat'); if (s) return JSON.parse(s); } catch { /**/ }
     return [];
   });
+
+  /* Info about what AI is assigned to the ai-producer module */
+  const moduleInfo = ai.getModuleInfo(MODULE_ID);
+  const isActive = ai.isModuleActive(MODULE_ID);
 
   useEffect(() => { localStorage.setItem('podcraft_notes', notes); }, [notes]);
   useEffect(() => { localStorage.setItem('podcraft_chat', JSON.stringify(messages.slice(-60))); }, [messages]);
@@ -43,10 +46,10 @@ export function StudioAIPanel({ width, collapsed, onToggleCollapsed }: StudioAIP
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
 
-    if (!ai.isActive) {
+    if (!isActive) {
       setMessages(prev => [...prev, {
         role: 'system',
-        content: 'No AI configured. Click "AI Setup" in the header to connect a Local or Cloud AI model.',
+        content: 'No AI assigned to AI Producer. Click "AI Setup" → Assignments and assign a model.',
       }]);
       return;
     }
@@ -58,7 +61,7 @@ export function StudioAIPanel({ width, collapsed, onToggleCollapsed }: StudioAIP
     setIsLoading(true);
 
     try {
-      const reply = await ai.sendMessage(history);
+      const reply = await ai.sendMessage(MODULE_ID, history.map(m => ({ role: m.role, content: m.content })));
       setMessages(prev => [...prev, { role: 'assistant', content: reply }]);
     } catch (err) {
       setMessages(prev => [...prev, {
@@ -100,22 +103,9 @@ export function StudioAIPanel({ width, collapsed, onToggleCollapsed }: StudioAIP
     );
   }
 
-  /* ── Active AI status pill ── */
-  const StatusPill = () => {
-    if (!ai.isActive) return (
-      <div className="flex items-center gap-1 ml-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-gray-100 text-gray-400">
-        <WifiOff className="w-2.5 h-2.5" /> OFFLINE
-      </div>
-    );
-    return (
-      <div className={`flex items-center gap-1 ml-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold ${
-        ai.aiMode === 'local' ? 'bg-violet-50 text-violet-700' : 'bg-blue-50 text-blue-700'
-      }`}>
-        {ai.aiMode === 'local' ? <Cpu className="w-2.5 h-2.5" /> : <Wifi className="w-2.5 h-2.5" />}
-        {ai.modelName ?? (ai.aiMode === 'local' ? 'LOCAL' : 'CLOUD')}
-      </div>
-    );
-  };
+  const isLocal = ai.assignments[MODULE_ID]?.isLocal
+    ?? ai.assignments['global-default']?.isLocal
+    ?? false;
 
   return (
     <div className="bg-white border-l border-gray-200 flex flex-col flex-shrink-0" style={{ width }}>
@@ -125,7 +115,12 @@ export function StudioAIPanel({ width, collapsed, onToggleCollapsed }: StudioAIP
         <div className="flex items-center gap-2 min-w-0">
           <Sparkles className="w-5 h-5 text-violet-600 flex-shrink-0" />
           <span className="font-semibold text-gray-900 text-sm">AI Producer</span>
-          <StatusPill />
+          {isActive && (
+            <div className={`flex items-center gap-1 ml-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold ${isLocal ? 'bg-violet-50 text-violet-700' : 'bg-blue-50 text-blue-700'}`}>
+              {isLocal ? <Cpu className="w-2.5 h-2.5" /> : <Cloud className="w-2.5 h-2.5" />}
+              {moduleInfo?.modelName}
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-1 text-gray-400 flex-shrink-0">
           <AIModelSelector />
@@ -150,17 +145,15 @@ export function StudioAIPanel({ width, collapsed, onToggleCollapsed }: StudioAIP
         </div>
       </div>
 
-      {/* Active AI info bar — shown when connected */}
-      {ai.isActive && (
-        <div className={`px-4 py-1.5 border-b text-[10px] flex items-center gap-2 ${
-          ai.aiMode === 'local' ? 'bg-violet-50 border-violet-100 text-violet-600' : 'bg-blue-50 border-blue-100 text-blue-600'
-        }`}>
-          {ai.aiMode === 'local' ? <Cpu className="w-3 h-3 flex-shrink-0" /> : <Cloud className="w-3 h-3 flex-shrink-0" />}
+      {/* Active AI info bar */}
+      {isActive && moduleInfo && (
+        <div className={`px-4 py-1.5 border-b text-[10px] flex items-center gap-2 ${isLocal ? 'bg-violet-50 border-violet-100 text-violet-600' : 'bg-blue-50 border-blue-100 text-blue-600'}`}>
+          {isLocal ? <Cpu className="w-3 h-3 flex-shrink-0" /> : <Cloud className="w-3 h-3 flex-shrink-0" />}
           <span className="font-medium">
-            {ai.aiMode === 'local' ? 'Local' : 'Cloud'} · {ai.runtime} · {ai.modelName}
+            {isLocal ? 'Local · Transformers.js' : `Cloud · ${moduleInfo.providerName}`} · {moduleInfo.modelName}
           </span>
-          <span className={`ml-auto font-bold ${ai.aiMode === 'local' ? 'text-green-600' : 'text-blue-600'}`}>
-            {ai.activeStatus === 'ready' ? '● Ready' : '● Connected'}
+          <span className={`ml-auto font-bold ${isLocal ? 'text-green-600' : 'text-blue-600'}`}>
+            ● {moduleInfo.status}
           </span>
         </div>
       )}
@@ -184,9 +177,9 @@ export function StudioAIPanel({ width, collapsed, onToggleCollapsed }: StudioAIP
               <div className="text-center py-8 space-y-3">
                 <Sparkles className="w-8 h-8 text-violet-300 mx-auto" />
                 <p className="text-sm text-gray-400 font-medium">AI Producer</p>
-                {!ai.isActive ? (
+                {!isActive ? (
                   <p className="text-xs text-gray-400">
-                    Click <strong className="text-violet-600">AI Setup</strong> to connect Local AI or Cloud AI.
+                    Click <strong className="text-violet-600">AI Setup</strong> → connect a provider → assign it to <strong>AI Producer</strong>.
                   </p>
                 ) : (
                   <p className="text-xs text-gray-400">Start a conversation with your AI Producer.</p>
@@ -238,18 +231,17 @@ export function StudioAIPanel({ width, collapsed, onToggleCollapsed }: StudioAIP
               { label: 'Write Outro Script', prompt: 'Write a brief, warm outro for this episode with a call-to-action to subscribe and leave a review.' },
               { label: 'Social Media Captions', prompt: 'Write 3 social media captions (Twitter/X, Instagram, LinkedIn) to promote this episode.' },
             ].map(tool => (
-              <button
-                key={tool.label}
-                disabled={!ai.isActive}
+              <button key={tool.label}
+                disabled={!isActive}
                 onClick={() => { setInput(tool.prompt); setActiveTab('Chat'); }}
-                className={`w-full text-left p-3 bg-white border rounded-lg text-sm font-medium flex items-center justify-between gap-2 transition-colors ${ai.isActive ? 'border-gray-200 text-gray-700 hover:border-violet-300 hover:bg-violet-50 cursor-pointer' : 'border-gray-100 text-gray-300 cursor-not-allowed'}`}>
+                className={`w-full text-left p-3 bg-white border rounded-lg text-sm font-medium flex items-center justify-between gap-2 transition-colors ${isActive ? 'border-gray-200 text-gray-700 hover:border-violet-300 hover:bg-violet-50 cursor-pointer' : 'border-gray-100 text-gray-300 cursor-not-allowed'}`}>
                 {tool.label}
-                <Sparkles className={`w-4 h-4 shrink-0 ${ai.isActive ? 'text-violet-400' : 'opacity-30'}`} />
+                <Zap className={`w-4 h-4 shrink-0 ${isActive ? 'text-violet-400' : 'opacity-30'}`} />
               </button>
             ))}
-            {!ai.isActive && (
+            {!isActive && (
               <p className="text-xs text-center text-gray-400 py-2">
-                Connect an AI via <strong className="text-violet-600">AI Setup</strong> to enable these tools.
+                Assign an AI to <strong className="text-violet-600">AI Producer</strong> via AI Setup to enable these tools.
               </p>
             )}
           </div>
@@ -264,7 +256,7 @@ export function StudioAIPanel({ width, collapsed, onToggleCollapsed }: StudioAIP
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-              placeholder={ai.isActive ? 'Ask your AI Producer anything… (Enter to send)' : 'Connect an AI model to start chatting…'}
+              placeholder={isActive ? 'Ask your AI Producer anything… (Enter to send)' : 'Assign an AI model to start chatting…'}
               rows={2}
               className="flex-1 px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-200 resize-none leading-snug" />
             <button
